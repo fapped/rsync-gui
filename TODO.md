@@ -41,6 +41,11 @@
       "Copy (rsync -avhP)" etc., and Dolphin says "Copy to…", "Copy and verify to…", "Copy to FAT/NTFS/NAS…".
       Show the `name` in the menu (file name as a tooltip, `--preset` keeps using file names) and make the
       three places use the same wording, e.g. "Copy", "Copy and verify", "Copy to FAT/NTFS/NAS"
+- [ ] "Close when finished" checkbox (asked 2026-10-25, for later): quit Rsync GUI after the job ends.
+      Only on full success (`Summary::ok()`) — after errors, verification differences or cancellation
+      the window stays open with the log. To decide: a remembered window preference, or an option in
+      the JSON settings so that presets (the Dolphin actions) can turn it on; possibly a desktop
+      notification with the summary before closing (see the progress-outside-the-window item)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
