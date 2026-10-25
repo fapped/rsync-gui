@@ -1,0 +1,24 @@
+{
+    "format": "rsync-gui-settings",
+    "version": 1,
+    "name": "Copy (rsync -avhP)",
+    "options": {
+        "archive": true,
+        "recursive": true,
+        "hardLinks": false,
+        "acls": false,
+        "xattrs": false,
+        "verbose": true,
+        "human": true,
+        "partial": true,
+        "progress": "per-file",
+        "checksum": false,
+        "existing": "replace",
+        "compress": false,
+        "contentsOnly": false,
+        "deleteExtraneous": false,
+        "removeSourceFiles": false,
+        "dryRun": false,
+        "verifyAfter": false
+    }
+}

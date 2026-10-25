@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Rsync GUI
+Comment=Copy files and directories with rsync, optionally verifying the copy
+Exec=rsync-gui %U
+Icon=folder-sync
+Terminal=false
+Categories=Utility;FileTools;Qt;

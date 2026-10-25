@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;
+X-KDE-Protocols=file,sftp
+X-KDE-Submenu=Rsync
+X-KDE-Priority=TopLevel
+Icon=folder-sync
+Actions=rsyncCopy;rsyncCopyVerify;
+
+[Desktop Action rsyncCopy]
+Name=Copy to…
+Icon=folder-sync
+Exec=rsync-gui --preset rsync-copy --browse-destination %U
+
+[Desktop Action rsyncCopyVerify]
+Name=Copy and verify to…
+Icon=security-high
+Exec=rsync-gui --preset rsync-copy-verify --browse-destination %U
