@@ -36,6 +36,11 @@
         `KUiServerV2JobTracker` from KF6 JobWidgets + a `KJob` wrapping `RsyncJob`, or `org.kde.JobViewServerV2`
         over D-Bus directly to avoid the KF6 dependency
       - both optional at runtime (no-op outside KDE / without the D-Bus services)
+- [ ] Consistent preset names (asked 2026-10-25, for later): *File → Load preset* shows file names
+      (`rsync-copy`, `rsync-copy-verify`, `rsync-copy-portable`), the presets' `name` fields say
+      "Copy (rsync -avhP)" etc., and Dolphin says "Copy to…", "Copy and verify to…", "Copy to FAT/NTFS/NAS…".
+      Show the `name` in the menu (file name as a tooltip, `--preset` keeps using file names) and make the
+      three places use the same wording, e.g. "Copy", "Copy and verify", "Copy to FAT/NTFS/NAS"
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
