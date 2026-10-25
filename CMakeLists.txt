@@ -41,12 +41,23 @@ foreach(preset IN LISTS RSYNC_GUI_PRESETS)
 endforeach()
 
 install(TARGETS rsync-gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES packaging/rsync-gui.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+# The .desktop files get the absolute path of the installed executable, so that Dolphin and the
+# launcher find it even when <prefix>/bin is not in their PATH (e.g. ~/.local/bin before re-login).
+# They are generated at install time, because `cmake --install --prefix` may change the prefix.
+set(RSYNC_GUI_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/packaging)
+install(CODE "
+    set(RSYNC_GUI_EXECUTABLE \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rsync-gui\")
+    configure_file(\"${CMAKE_CURRENT_SOURCE_DIR}/packaging/rsync-gui.desktop.in\"
+                   \"${RSYNC_GUI_GENERATED_DIR}/rsync-gui.desktop\" @ONLY)
+    configure_file(\"${CMAKE_CURRENT_SOURCE_DIR}/packaging/servicemenus/rsync-gui.desktop.in\"
+                   \"${RSYNC_GUI_GENERATED_DIR}/servicemenus/rsync-gui.desktop\" @ONLY)
+")
+install(FILES ${RSYNC_GUI_GENERATED_DIR}/rsync-gui.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${RSYNC_GUI_PRESETS} DESTINATION ${CMAKE_INSTALL_DATADIR}/rsync-gui/presets)
 if(RSYNC_GUI_INSTALL_SERVICEMENUS)
     # KF6 ignores service menus without the executable bit in user directories.
     install(FILES
-        packaging/servicemenus/rsync-gui.desktop
+        ${RSYNC_GUI_GENERATED_DIR}/servicemenus/rsync-gui.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/kio/servicemenus
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     )

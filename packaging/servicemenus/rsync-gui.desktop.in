@@ -11,9 +11,9 @@ Actions=rsyncCopy;rsyncCopyVerify;
 [Desktop Action rsyncCopy]
 Name=Copy to…
 Icon=folder-sync
-Exec=rsync-gui --preset rsync-copy --browse-destination %U
+Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy --browse-destination %U
 
 [Desktop Action rsyncCopyVerify]
 Name=Copy and verify to…
 Icon=security-high
-Exec=rsync-gui --preset rsync-copy-verify --browse-destination %U
+Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy-verify --browse-destination %U

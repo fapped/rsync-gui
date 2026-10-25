@@ -13,11 +13,13 @@
 - [x] Command preview, progress (per file / overall), speed and ETA, log, cancellation
 - [x] Remembered options, JSON export/import (+ `--config`), presets `rsync-copy` / `rsync-copy-verify`
 - [x] Dolphin context menu (*Rsync* submenu: Copy to…, Copy and verify to…), installed by CMake
+      with the absolute program path
+- [x] Installed to `~/.local`; the older service menu removed
 
 ## To do
 
-- [ ] Check the Dolphin menu after installing on a live system (so far only installed into a test prefix)
-- [ ] Remove the older service menu after installation (user's decision)
+- [ ] Click through the Dolphin menu on the live system (installed to `~/.local` on 2026-10-25,
+      the installed Exec line was started manually and works)
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] "Move to…" Dolphin action (`--remove-source-files` + removing emptied source directories)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)

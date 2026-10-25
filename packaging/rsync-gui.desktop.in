@@ -2,7 +2,7 @@
 Type=Application
 Name=Rsync GUI
 Comment=Copy files and directories with rsync, optionally verifying the copy
-Exec=rsync-gui %U
+Exec=@RSYNC_GUI_EXECUTABLE@ %U
 Icon=folder-sync
 Terminal=false
 Categories=Utility;FileTools;Qt;
