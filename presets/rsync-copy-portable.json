@@ -1,0 +1,30 @@
+{
+    "format": "rsync-gui-settings",
+    "version": 1,
+    "name": "Copy to FAT/exFAT/NTFS or NAS (rsync -rltvhP)",
+    "options": {
+        "archive": false,
+        "recursive": true,
+        "links": true,
+        "perms": false,
+        "times": true,
+        "group": false,
+        "owner": false,
+        "devices": false,
+        "hardLinks": false,
+        "acls": false,
+        "xattrs": false,
+        "verbose": true,
+        "human": true,
+        "partial": true,
+        "progress": "per-file",
+        "checksum": false,
+        "existing": "replace",
+        "compress": false,
+        "contentsOnly": false,
+        "deleteExtraneous": false,
+        "removeSourceFiles": false,
+        "dryRun": false,
+        "verifyAfter": false
+    }
+}

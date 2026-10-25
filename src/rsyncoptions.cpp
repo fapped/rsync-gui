@@ -12,6 +12,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#include <utility>
+
 namespace {
 
 const QString kJsonFormat = QStringLiteral("rsync-gui-settings");
@@ -50,6 +52,12 @@ struct BoolOption
 constexpr BoolOption kBoolOptions[] = {
     {"archive", &RsyncOptions::archive},
     {"recursive", &RsyncOptions::recursive},
+    {"links", &RsyncOptions::links},
+    {"perms", &RsyncOptions::perms},
+    {"times", &RsyncOptions::times},
+    {"group", &RsyncOptions::group},
+    {"owner", &RsyncOptions::owner},
+    {"devices", &RsyncOptions::devices},
     {"hardLinks", &RsyncOptions::hardLinks},
     {"acls", &RsyncOptions::acls},
     {"xattrs", &RsyncOptions::xattrs},
@@ -129,10 +137,18 @@ QStringList RsyncOptions::arguments(int port) const
     // Single-letter options are grouped ("-avhP"), so the command looks like one typed by hand.
     QString flags;
     QStringList longOptions;
-    if (archive)
+    if (archive) {
         flags += QLatin1Char('a');
-    else if (recursive)
-        flags += QLatin1Char('r');
+    } else {
+        const std::pair<bool, char> implied[] = {
+            {recursive, 'r'}, {links, 'l'}, {perms, 'p'}, {times, 't'},
+            {group, 'g'},     {owner, 'o'}, {devices, 'D'},
+        };
+        for (const auto &[enabled, flag] : implied) {
+            if (enabled)
+                flags += QLatin1Char(flag);
+        }
+    }
     if (hardLinks)
         flags += QLatin1Char('H');
     if (acls)
@@ -191,7 +207,7 @@ QStringList RsyncOptions::verifyArguments(int port) const
     QString flags = QStringLiteral("n");
     if (archive || recursive)
         flags += QLatin1Char('r');
-    if (archive)
+    if (archive || links)
         flags += QLatin1Char('l');
     flags += QStringLiteral("ci");
     return QStringList{QLatin1Char('-') + flags, QStringLiteral("--out-format=%i %n%L")}

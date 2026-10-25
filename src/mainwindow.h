@@ -56,6 +56,9 @@ private:
 
     RsyncOptions currentOptions() const;
     void applyOptions(const RsyncOptions &options);
+    // The boxes of -rlptgoD (the parts of -a), in this order.
+    QList<QCheckBox *> impliedByArchive() const;
+    void onArchiveToggled(bool on);
     QList<Location> sources() const;
     Location destination() const;
     void refreshSourceItem(QListWidgetItem *item);
@@ -99,6 +102,14 @@ private:
     QComboBox *m_programCombo = nullptr;
     QCheckBox *m_archiveCheck = nullptr;
     QCheckBox *m_recursiveCheck = nullptr;
+    QCheckBox *m_linksCheck = nullptr;
+    QCheckBox *m_permsCheck = nullptr;
+    QCheckBox *m_timesCheck = nullptr;
+    QCheckBox *m_groupCheck = nullptr;
+    QCheckBox *m_ownerCheck = nullptr;
+    QCheckBox *m_devicesCheck = nullptr;
+    // The user's choice of -rlptgoD while archive mode is on (the boxes then show -a's values).
+    QList<bool> m_impliedValues = QList<bool>(7, true);
     QCheckBox *m_hardLinksCheck = nullptr;
     QCheckBox *m_aclsCheck = nullptr;
     QCheckBox *m_xattrsCheck = nullptr;

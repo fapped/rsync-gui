@@ -35,6 +35,7 @@ option(RSYNC_GUI_INSTALL_SERVICEMENUS "Install the Dolphin (KDE) context menu en
 set(RSYNC_GUI_PRESETS
     presets/rsync-copy.json
     presets/rsync-copy-verify.json
+    presets/rsync-copy-portable.json
 )
 foreach(preset IN LISTS RSYNC_GUI_PRESETS)
     configure_file(${preset} ${CMAKE_CURRENT_BINARY_DIR}/${preset} COPYONLY)

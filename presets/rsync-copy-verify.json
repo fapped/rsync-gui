@@ -5,6 +5,12 @@
     "options": {
         "archive": true,
         "recursive": true,
+        "links": true,
+        "perms": true,
+        "times": true,
+        "group": true,
+        "owner": true,
+        "devices": true,
         "hardLinks": false,
         "acls": false,
         "xattrs": false,

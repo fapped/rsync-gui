@@ -9,7 +9,8 @@ be passed as additional arguments.
   paste many paths (`Ctrl+V`, including files copied in Dolphin), drag & drop, paths on the command line,
 - **destination**: a local directory (created if missing) or a remote one, with a list of
   recently used destinations,
-- the most useful **rsync options**: `-a`, `-r`, `-H`, `-A`, `-X`, `-v`, `-h`, `--partial`,
+- the most useful **rsync options**: `-a` or its parts separately (`-r`, `-l`, `-p`, `-t`, `-g`, `-o`,
+  `-D`, e.g. `-rlt`), `-H`, `-A`, `-X`, `-v`, `-h`, `--partial`,
   `--progress` / `--info=progress2`, `-c`, `-u`, `--ignore-existing`, `-z`, `--bwlimit`, `-e`,
   `--delete`, `--remove-source-files`, `-n`, copying directory contents (trailing `/`) and a field for
   **any other arguments** (e.g. `--exclude='*.tmp' --mkpath`),
@@ -93,6 +94,7 @@ Installed into `<prefix>/share/rsync-gui/presets/`:
 |---|---|---|
 | `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
 | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
+| `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
 
 Presets set the copy options but not the program, the remote shell, the bandwidth limit or the
 additional arguments — those stay as chosen by the user. They are searched for in this order:
@@ -106,7 +108,8 @@ you can also add your own presets (any `*.json` name, format as below).
 After installation Dolphin shows an **Rsync** submenu for files and directories:
 
 - **Copy to…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
-- **Copy and verify to…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`).
+- **Copy and verify to…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
+- **Copy to FAT/NTFS/NAS…** — `--preset rsync-copy-portable` (`rsync -rltvhP`).
 
 Clicking an entry opens Rsync GUI with the selected items as sources and the preset loaded, and
 immediately asks for the destination directory (starting in the last used destination). The copy
@@ -118,6 +121,18 @@ must be reachable without typing in a terminal: ssh keys / an agent, or a passwo
 
 If you used your own rsync service menu before, remove it to avoid duplicated entries.
 New entries usually appear immediately; if not, run `kbuildsycoca6`.
+
+## Archive mode and its parts
+
+`-a` means `-rlptgoD`. With *Archive mode (-a)* on, its parts are shown checked and cannot be changed;
+turn it off to choose them separately — the command is then built from the checked parts (e.g.
+`-rltvhP`). Your choice of the parts is kept while archive mode is on and comes back when you turn
+it off again. Without `-a` the parts default to all on, so turning it off alone changes nothing.
+
+`-rlt` is the usual choice for drives and shares that cannot store Unix permissions and owners
+(FAT/exFAT/NTFS, many NAS shares) — with `-a` rsync reports errors for every file there.
+FAT stores modification times with a 2-second resolution: add `--modify-window=1` to the additional
+arguments, otherwise repeated runs copy unchanged files again.
 
 ## What "verify" does
 
@@ -158,6 +173,12 @@ with *Import settings…* become the new remembered options (unlike presets and 
         "extraArguments": "--exclude='*.tmp'",
         "archive": true,
         "recursive": true,
+        "links": true,
+        "perms": true,
+        "times": true,
+        "group": true,
+        "owner": true,
+        "devices": true,
         "hardLinks": false,
         "acls": false,
         "xattrs": false,
@@ -181,7 +202,8 @@ with *Import settings…* become the new remembered options (unlike presets and 
 
 - `progress`: `none`, `per-file` (`--progress`, `-P` with `partial`), `overall` (`--info=progress2`),
 - `existing`: `replace`, `skip-newer` (`-u`), `ignore-existing` (`--ignore-existing`),
-- `recursive` is used only when `archive` is false (`-a` implies `-r`),
+- `recursive`, `links`, `perms`, `times`, `group`, `owner`, `devices` (`-rlptgoD`) are used only
+  when `archive` is false (`-a` implies them all),
 - `extraArguments` is split like a shell command line (quotes and backslashes),
 - `name` (optional) — the name shown in the window and in the log,
 - keys missing from `options` keep the current values from the window, unknown keys are ignored,

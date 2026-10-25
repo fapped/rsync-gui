@@ -6,7 +6,7 @@ X-KDE-Protocols=file,sftp
 X-KDE-Submenu=Rsync
 X-KDE-Priority=TopLevel
 Icon=folder-sync
-Actions=rsyncCopy;rsyncCopyVerify;
+Actions=rsyncCopy;rsyncCopyVerify;rsyncCopyPortable;
 
 [Desktop Action rsyncCopy]
 Name=Copy to…
@@ -17,3 +17,8 @@ Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy --browse-destination %U
 Name=Copy and verify to…
 Icon=security-high
 Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy-verify --browse-destination %U
+
+[Desktop Action rsyncCopyPortable]
+Name=Copy to FAT/NTFS/NAS…
+Icon=drive-removable-media
+Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy-portable --browse-destination %U

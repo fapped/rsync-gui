@@ -164,20 +164,36 @@ void MainWindow::buildUi()
     auto *preserveGrid = new QGridLayout;
     m_archiveCheck = new QCheckBox(tr("Archive mode (-a)"), m_optionsBox);
     m_archiveCheck->setToolTip(tr("-a, --archive: recursive, preserve symlinks, permissions, times, group, owner "
-                                  "and special files (-rlptgoD)"));
+                                  "and special files (-rlptgoD).\nTurn it off to choose the parts separately, e.g. -rlt "
+                                  "for FAT/exFAT/NTFS drives or a NAS without permissions and owners."));
     m_recursiveCheck = new QCheckBox(tr("Recursive (-r)"), m_optionsBox);
-    m_recursiveCheck->setToolTip(tr("-r, --recursive: copy directories recursively (implied by -a)"));
+    m_recursiveCheck->setToolTip(tr("-r, --recursive: copy directories recursively"));
+    m_linksCheck = new QCheckBox(tr("Symlinks (-l)"), m_optionsBox);
+    m_linksCheck->setToolTip(tr("-l, --links: copy symlinks as symlinks (without it they are skipped)"));
+    m_permsCheck = new QCheckBox(tr("Permissions (-p)"), m_optionsBox);
+    m_permsCheck->setToolTip(tr("-p, --perms: preserve permissions"));
+    m_timesCheck = new QCheckBox(tr("Times (-t)"), m_optionsBox);
+    m_timesCheck->setToolTip(tr("-t, --times: preserve modification times. Without it every run copies all files "
+                                "again, because the times never match. On FAT/exFAT add --modify-window=1."));
+    m_groupCheck = new QCheckBox(tr("Group (-g)"), m_optionsBox);
+    m_groupCheck->setToolTip(tr("-g, --group: preserve the group"));
+    m_ownerCheck = new QCheckBox(tr("Owner (-o)"), m_optionsBox);
+    m_ownerCheck->setToolTip(tr("-o, --owner: preserve the owner (requires root on the receiving side)"));
+    m_devicesCheck = new QCheckBox(tr("Devices, specials (-D)"), m_optionsBox);
+    m_devicesCheck->setToolTip(tr("-D: preserve device files and special files (FIFOs, sockets)"));
     m_hardLinksCheck = new QCheckBox(tr("Hard links (-H)"), m_optionsBox);
     m_hardLinksCheck->setToolTip(tr("-H, --hard-links: preserve hard links"));
     m_aclsCheck = new QCheckBox(tr("ACLs (-A)"), m_optionsBox);
     m_aclsCheck->setToolTip(tr("-A, --acls: preserve ACLs (implies -p)"));
     m_xattrsCheck = new QCheckBox(tr("Extended attributes (-X)"), m_optionsBox);
     m_xattrsCheck->setToolTip(tr("-X, --xattrs: preserve extended attributes"));
-    preserveGrid->addWidget(m_archiveCheck, 0, 0);
-    preserveGrid->addWidget(m_recursiveCheck, 0, 1);
-    preserveGrid->addWidget(m_hardLinksCheck, 1, 0);
-    preserveGrid->addWidget(m_aclsCheck, 1, 1);
-    preserveGrid->addWidget(m_xattrsCheck, 1, 2);
+    preserveGrid->addWidget(m_archiveCheck, 0, 0, 1, 4);
+    const QList<QCheckBox *> implied = impliedByArchive();
+    for (qsizetype i = 0; i < implied.size(); ++i)
+        preserveGrid->addWidget(implied.at(i), 1 + int(i / 4), int(i % 4));
+    preserveGrid->addWidget(m_hardLinksCheck, 3, 0);
+    preserveGrid->addWidget(m_aclsCheck, 3, 1);
+    preserveGrid->addWidget(m_xattrsCheck, 3, 2);
     form->addRow(tr("Copy:"), preserveGrid);
 
     m_existingCombo = new QComboBox(m_optionsBox);
@@ -371,7 +387,10 @@ void MainWindow::buildUi()
         updateControls();
     };
     connect(m_programCombo, &QComboBox::currentTextChanged, this, refresh);
-    for (QCheckBox *box : {m_archiveCheck, m_recursiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
+    connect(m_archiveCheck, &QCheckBox::toggled, this, &MainWindow::onArchiveToggled);
+    for (QCheckBox *box : impliedByArchive())
+        connect(box, &QCheckBox::toggled, this, refresh);
+    for (QCheckBox *box : {m_archiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
                            m_checksumCheck, m_partialCheck, m_verboseCheck, m_humanCheck, m_compressCheck,
                            m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck,
                            m_dryRunCheck, m_verifyCheck}) {
@@ -471,7 +490,11 @@ RsyncOptions MainWindow::currentOptions() const
     RsyncOptions o;
     o.program = m_programCombo->currentText().trimmed();
     o.archive = m_archiveCheck->isChecked();
-    o.recursive = m_recursiveCheck->isChecked();
+    // While -a is on, the implied boxes only show what it includes; the user's own choice is kept aside.
+    const QList<QCheckBox *> implied = impliedByArchive();
+    bool *parts[] = {&o.recursive, &o.links, &o.perms, &o.times, &o.group, &o.owner, &o.devices};
+    for (qsizetype i = 0; i < implied.size(); ++i)
+        *parts[i] = o.archive ? m_impliedValues.at(i) : implied.at(i)->isChecked();
     o.hardLinks = m_hardLinksCheck->isChecked();
     o.acls = m_aclsCheck->isChecked();
     o.xattrs = m_xattrsCheck->isChecked();
@@ -500,8 +523,13 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     if (m_programCombo->findText(o.program) < 0 && !o.program.isEmpty())
         m_programCombo->addItem(o.program);
     m_programCombo->setCurrentText(o.program);
+    // First show the parts of -a as they are in `o`, then let onArchiveToggled() set them aside if -a is on.
+    m_archiveCheck->setChecked(false);
+    const QList<QCheckBox *> implied = impliedByArchive();
+    const bool parts[] = {o.recursive, o.links, o.perms, o.times, o.group, o.owner, o.devices};
+    for (qsizetype i = 0; i < implied.size(); ++i)
+        implied.at(i)->setChecked(parts[i]);
     m_archiveCheck->setChecked(o.archive);
-    m_recursiveCheck->setChecked(o.recursive);
     m_hardLinksCheck->setChecked(o.hardLinks);
     m_aclsCheck->setChecked(o.acls);
     m_xattrsCheck->setChecked(o.xattrs);
@@ -524,6 +552,26 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     m_extraEdit->setText(o.extraArguments);
     updatePreview();
     updateControls();
+}
+
+QList<QCheckBox *> MainWindow::impliedByArchive() const
+{
+    // The order of -rlptgoD, also used by currentOptions() and applyOptions().
+    return {m_recursiveCheck, m_linksCheck, m_permsCheck, m_timesCheck, m_groupCheck, m_ownerCheck, m_devicesCheck};
+}
+
+void MainWindow::onArchiveToggled(bool on)
+{
+    const QList<QCheckBox *> implied = impliedByArchive();
+    for (qsizetype i = 0; i < implied.size(); ++i) {
+        const QSignalBlocker blocker(implied.at(i));
+        if (on) {
+            m_impliedValues[i] = implied.at(i)->isChecked();
+            implied.at(i)->setChecked(true);
+        } else {
+            implied.at(i)->setChecked(m_impliedValues.at(i));
+        }
+    }
 }
 
 void MainWindow::addSources(const QStringList &paths)
@@ -705,7 +753,8 @@ void MainWindow::updateControls()
         m_importAction->setEnabled(!running);
     if (m_presetMenu)
         m_presetMenu->setEnabled(!running);
-    m_recursiveCheck->setEnabled(!m_archiveCheck->isChecked());
+    for (QCheckBox *box : impliedByArchive())
+        box->setEnabled(!m_archiveCheck->isChecked());
     m_bwLimitEdit->setEnabled(m_bwLimitCheck->isChecked());
     m_remoteShellEdit->setEnabled(m_remoteShellCheck->isChecked());
     m_removeSourcesButton->setEnabled(!m_sourceList->selectedItems().isEmpty());

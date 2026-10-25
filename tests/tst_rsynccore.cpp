@@ -100,6 +100,7 @@ private slots:
     void parseDifference();
     void copyLocal();
     void copyWithVerify();
+    void copyRltKeepsTimesNotPermissions();
     void verifyDetectsDifference();
     void dryRunChangesNothing();
     void moveRemovesSources();
@@ -137,8 +138,11 @@ void TestRsyncCore::arguments_data()
     QTest::newRow("no partial") << "nopartial" << QStringList{"-avh", "--progress"};
     QTest::newRow("overall") << "overall" << QStringList{"-avh", "--partial", "--info=progress2"};
     QTest::newRow("no progress") << "noprogress" << QStringList{"-avh", "--partial"};
-    QTest::newRow("no archive") << "noarchive" << QStringList{"-rvhP"};
-    QTest::newRow("no archive, no recursion") << "flat" << QStringList{"-vhP"};
+    // Without -a its parts are listed one by one; by default they equal -a.
+    QTest::newRow("no archive") << "noarchive" << QStringList{"-rlptgoDvhP"};
+    QTest::newRow("rlt") << "rlt" << QStringList{"-rltvhP"};
+    QTest::newRow("parts ignored with archive") << "archiveparts" << QStringList{"-avhP"};
+    QTest::newRow("no archive, nothing preserved") << "flat" << QStringList{"-vhP"};
     QTest::newRow("preserve all") << "preserve" << QStringList{"-aHAXvhP"};
     QTest::newRow("update") << "update" << QStringList{"-avhPu"};
     QTest::newRow("ignore existing") << "ignore" << QStringList{"-avhP", "--ignore-existing"};
@@ -167,9 +171,14 @@ void TestRsyncCore::arguments()
         o.progress = RsyncOptions::Progress::None;
     } else if (change == "noarchive") {
         o.archive = false;
+    } else if (change == "rlt") {
+        o.archive = false;
+        o.perms = o.group = o.owner = o.devices = false;
+    } else if (change == "archiveparts") {
+        o.perms = o.group = o.owner = o.devices = false;
     } else if (change == "flat") {
         o.archive = false;
-        o.recursive = false;
+        o.recursive = o.links = o.perms = o.times = o.group = o.owner = o.devices = false;
     } else if (change == "preserve") {
         o.hardLinks = o.acls = o.xattrs = true;
     } else if (change == "update") {
@@ -188,7 +197,8 @@ void TestRsyncCore::arguments()
     } else if (change == "extra") {
         o.extraArguments = "--exclude='*.tmp' --exclude \"a b\" --mkpath";
     } else if (change == "nothing") {
-        o.archive = o.recursive = o.verbose = o.human = o.partial = false;
+        o.archive = o.recursive = o.links = o.perms = o.times = o.group = o.owner = o.devices = false;
+        o.verbose = o.human = o.partial = false;
         o.progress = RsyncOptions::Progress::None;
     }
     QCOMPARE(o.arguments(), expected);
@@ -200,6 +210,8 @@ void TestRsyncCore::verifyArguments()
     o.extraArguments = "--exclude=.cache";
     QCOMPARE(o.verifyArguments(), (QStringList{"-nrlci", "--out-format=%i %n%L", "--exclude=.cache"}));
     o.archive = false;
+    QCOMPARE(o.verifyArguments().first(), QStringLiteral("-nrlci")); // -l from the parts of -a
+    o.links = false;
     QCOMPARE(o.verifyArguments().first(), QStringLiteral("-nrci"));
     o.recursive = false;
     QCOMPARE(o.verifyArguments().first(), QStringLiteral("-nci"));
@@ -553,6 +565,37 @@ void TestRsyncCore::copyWithVerify()
     QCOMPARE(readFile(dest + "/src/sub/b"), QByteArray("bbb"));
 }
 
+void TestRsyncCore::copyRltKeepsTimesNotPermissions()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a"), "aaa");
+    QVERIFY(QFile::link("a", tmp.filePath("src/link")));
+    QVERIFY(::chmod(QFile::encodeName(tmp.filePath("src/a")).constData(), 0777) == 0);
+    setMtime(tmp.filePath("src/a"), 1600000000);
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    RsyncOptions options = testOptions();
+    options.archive = false;
+    options.perms = options.group = options.owner = options.devices = false;
+    // Without -p new files get the source permissions masked by the umask; with -p exactly 0777.
+    const mode_t oldMask = ::umask(022);
+    RsyncJob job(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    const bool finished = runJob(job);
+    ::umask(oldMask);
+    QVERIFY(finished);
+    QVERIFY(job.summary().ok());
+    const QFileInfo copy(dest + "/src/a");
+    QCOMPARE(copy.lastModified().toSecsSinceEpoch(), 1600000000);
+    struct stat st;
+    QCOMPARE(::stat(QFile::encodeName(copy.filePath()).constData(), &st), 0);
+    QCOMPARE(st.st_mode & 07777, mode_t(0755));
+    QVERIFY(QFileInfo(dest + "/src/link").isSymLink());
+}
+
 void TestRsyncCore::verifyDetectsDifference()
 {
     if (!haveRsync())
@@ -648,6 +691,7 @@ void TestRsyncCore::jsonRoundTrip()
     o.program = "/usr/local/bin/rsync";
     o.archive = false;
     o.recursive = false;
+    o.perms = o.owner = false;
     o.hardLinks = o.acls = o.xattrs = true;
     o.verbose = o.human = o.partial = false;
     o.progress = RsyncOptions::Progress::Overall;
@@ -794,6 +838,7 @@ void TestRsyncCore::shippedPresets_data()
     // The presets reproduce the former Dolphin actions "Copy (rsync)" and "Copy (rsync + verify)".
     QTest::newRow("rsync-copy") << "rsync-copy" << QStringList{"-avhP"} << false;
     QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} << true;
+    QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} << false;
 }
 
 void TestRsyncCore::shippedPresets()

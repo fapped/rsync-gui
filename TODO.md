@@ -8,6 +8,8 @@
       add/paste/drop/command line
 - [x] Destination with recent destinations, created if missing, remote destinations
 - [x] Supported subset of rsync options + additional arguments field
+- [x] Parts of `-a` (`-rlptgoD`) as separate checkboxes, preset `rsync-copy-portable` (`-rltvhP`)
+      and the *Copy to FAT/NTFS/NAS…* Dolphin action
 - [x] Grouping of sources into rsync runs (local / per remote host)
 - [x] Verification pass (checksum dry run with itemized differences)
 - [x] Command preview, progress (per file / overall), speed and ETA, log, cancellation
@@ -25,6 +27,7 @@
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
+- [ ] `--modify-window=1` as a checkbox (or automatically for FAT destinations, detected with `QStorageInfo`)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

@@ -26,7 +26,15 @@ struct RsyncOptions
 
     QString program = QStringLiteral("rsync");
     bool archive = true;       // -a
-    bool recursive = true;     // -r (implied by -a, used only without it)
+    // -rlptgoD are implied by -a and used only without it. The defaults equal -a, so turning
+    // archive mode off changes nothing until some of them are turned off too (e.g. -rlt).
+    bool recursive = true;     // -r
+    bool links = true;         // -l
+    bool perms = true;         // -p
+    bool times = true;         // -t
+    bool group = true;         // -g
+    bool owner = true;         // -o
+    bool devices = true;       // -D (--devices --specials)
     bool hardLinks = false;    // -H
     bool acls = false;         // -A
     bool xattrs = false;       // -X
