@@ -28,6 +28,14 @@
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
 - [ ] `--modify-window=1` as a checkbox (or automatically for FAT destinations, detected with `QStorageInfo`)
+- [ ] Progress outside the window (asked 2026-10-25, for later):
+      - taskbar (Plasma task manager): the `com.canonical.Unity.LauncherEntry` D-Bus signal `Update`
+        with `application://rsync-gui.desktop` and `{progress: 0..1, progress-visible: bool}` —
+        only Qt6::DBus needed, the desktop file name must match (`setDesktopFileName` is already set)
+      - notification area (Plasma "jobs", like a Dolphin copy, with speed and a cancel button):
+        `KUiServerV2JobTracker` from KF6 JobWidgets + a `KJob` wrapping `RsyncJob`, or `org.kde.JobViewServerV2`
+        over D-Bus directly to avoid the KF6 dependency
+      - both optional at runtime (no-op outside KDE / without the D-Bus services)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
