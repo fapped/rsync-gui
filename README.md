@@ -17,7 +17,8 @@ be passed as additional arguments.
 - **verification after copying**: a second rsync pass that compares checksums of the source and the
   destination and lists every file that differs or is missing,
 - preview of the generated command, progress bar (per file or overall), speed and ETA, log,
-  cancellation, confirmation only for options that delete files,
+  cancellation, confirmation only for options that delete files, optional **closing the window
+  when the transfer finishes** successfully,
 - options are remembered between runs, export/import to/from JSON files, **presets** and
   integration with the **Dolphin** context menu (*Rsync* submenu).
 
@@ -125,6 +126,14 @@ must be reachable without typing in a terminal: ssh keys / an agent, or a passwo
 
 If you used your own rsync service menu before, remove it to avoid duplicated entries.
 New entries usually appear immediately; if not, run `kbuildsycoca6`.
+
+## Close when finished
+
+The *Close when finished* checkbox next to the *Copy* button quits Rsync GUI 1.5 s after a
+successful transfer (unchecking it in the meantime keeps the window open). After errors,
+verification differences, cancelling or a dry run the window always stays open with the log.
+It is a window preference, remembered immediately — also in a window opened from Dolphin with a
+preset — and not part of the settings files or presets.
 
 ## Archive mode and its parts
 

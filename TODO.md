@@ -18,6 +18,7 @@
       with the absolute program path
 - [x] Installed to `~/.local`; the older service menu removed
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
+- [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 
 ## To do
@@ -36,11 +37,6 @@
         `KUiServerV2JobTracker` from KF6 JobWidgets + a `KJob` wrapping `RsyncJob`, or `org.kde.JobViewServerV2`
         over D-Bus directly to avoid the KF6 dependency
       - both optional at runtime (no-op outside KDE / without the D-Bus services)
-- [ ] "Close when finished" checkbox (asked 2026-10-25, for later): quit Rsync GUI after the job ends.
-      Only on full success (`Summary::ok()`) — after errors, verification differences or cancellation
-      the window stays open with the log. To decide: a remembered window preference, or an option in
-      the JSON settings so that presets (the Dolphin actions) can turn it on; possibly a desktop
-      notification with the summary before closing (see the progress-outside-the-window item)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

@@ -33,6 +33,7 @@
 #include <QStatusBar>
 #include <QStorageInfo>
 #include <QTabWidget>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -319,7 +320,11 @@ void MainWindow::buildUi()
     m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { font-weight: bold; padding: 4px 16px; }"));
     m_startButton->setDefault(true);
     m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
+    m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
+    m_closeWhenFinishedCheck->setToolTip(tr("Quit Rsync GUI after a successful transfer. After errors, verification "
+                                            "differences, cancelling or a dry run the window stays open."));
     runRow->addWidget(m_progress, 1);
+    runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
     runRow->addWidget(m_cancelButton);
     mainLayout->addLayout(runRow);
@@ -381,6 +386,10 @@ void MainWindow::buildUi()
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::startCopy);
     connect(m_cancelButton, &QPushButton::clicked, this, &MainWindow::cancelCopy);
     connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
+    // A window preference, not an rsync option: remembered right away, also in a preset (session-only) window.
+    connect(m_closeWhenFinishedCheck, &QCheckBox::toggled, this, [](bool on) {
+        QSettings().setValue(QStringLiteral("window/closeWhenFinished"), on);
+    });
 
     const auto refresh = [this] {
         updatePreview();
@@ -462,6 +471,7 @@ void MainWindow::loadSettings()
     m_destinationCombo->addItems(recent);
     m_destinationCombo->setCurrentIndex(-1);
     m_destinationCombo->setEditText(QString());
+    m_closeWhenFinishedCheck->setChecked(settings.value(QStringLiteral("window/closeWhenFinished"), false).toBool());
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
 }
 
@@ -1115,7 +1125,14 @@ void MainWindow::onJobFinished()
         }
     }
     refreshSources();
-    if (summary.ok()) {
+    if (summary.ok() && m_closeWhenFinishedCheck->isChecked() && !m_job->options().dryRun) {
+        // A short moment to see the result; unchecking the box in the meantime keeps the window open.
+        m_currentFile->setText(tr("Finished successfully. Closing..."));
+        QTimer::singleShot(1500, this, [this] {
+            if (m_closeWhenFinishedCheck->isChecked() && !(m_job && m_job->isRunning()))
+                close();
+        });
+    } else if (summary.ok()) {
         m_currentFile->setText(tr("Finished successfully."));
         statusBar()->showMessage(tr("Finished successfully."), 10000);
     } else if (summary.cancelled) {

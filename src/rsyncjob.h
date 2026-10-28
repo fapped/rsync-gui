@@ -83,6 +83,7 @@ public:
     bool isRunning() const { return m_running; }
     const Summary &summary() const { return m_summary; }
     const QList<Transfer> &transfers() const { return m_transfers; }
+    const RsyncOptions &options() const { return m_options; }
     // Entries reported by the verification pass.
     const QStringList &differingFiles() const { return m_differingFiles; }
 
