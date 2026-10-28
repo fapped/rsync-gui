@@ -6,6 +6,8 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QGuiApplication>
+#include <QLocale>
+#include <QTime>
 
 namespace {
 
@@ -55,6 +57,7 @@ void DesktopProgress::start(const QString &title, const QString &source, const Q
     m_jobService.clear();
     m_jobPath.clear();
     m_progress = 0.0;
+    m_processedBytes = 0;
     m_progressChanged = true;
     m_elapsed.start();
     m_pending = {
@@ -94,6 +97,7 @@ void DesktopProgress::start(const QString &title, const QString &source, const Q
         QDBusConnection::sessionBus().connect(m_jobService, m_jobPath, kJobInterface, QStringLiteral("cancelRequested"),
                                               this, SLOT(onCancelRequested()));
         if (m_finishPending) {
+            sendUpdate({{QStringLiteral("infoMessage"), m_finishInfo}});
             terminateJob(m_finishCode, m_finishMessage, false);
             m_active = false;
             return;
@@ -138,8 +142,10 @@ void DesktopProgress::setSpeed(qint64 bytesPerSecond, qint64 processedBytes)
     if (!m_active)
         return;
     m_pending.insert(QStringLiteral("speed"), qulonglong(qMax<qint64>(0, bytesPerSecond)));
-    if (processedBytes >= 0)
+    if (processedBytes >= 0) {
+        m_processedBytes = processedBytes;
         m_pending.insert(QStringLiteral("processedBytes"), qulonglong(processedBytes));
+    }
     scheduleUpdate();
 }
 
@@ -157,8 +163,22 @@ void DesktopProgress::finish(bool cancelled, const QString &errorMessage)
         return;
     m_updateTimer.stop();
     m_pending.clear();
+    m_progressChanged = false;
     sendLauncherEntry(m_progress, false);
     const uint code = cancelled ? kErrorKilled : errorMessage.isEmpty() ? kErrorNone : kErrorUserDefined;
+
+    // The finished notification keeps the last info line - replace the progress ("... ETA 0:00:00")
+    // with a summary: "24,0 GiB in 0:00:57".
+    const QString duration = QTime(0, 0).addMSecs(int(m_elapsed.elapsed())).toString(QStringLiteral("H:mm:ss"));
+    if (cancelled)
+        m_finishInfo = tr("Cancelled after %1").arg(duration);
+    else if (!errorMessage.isEmpty())
+        m_finishInfo = errorMessage;
+    else if (m_processedBytes > 0)
+        m_finishInfo = tr("%1 in %2").arg(QLocale().formattedDataSize(m_processedBytes), duration);
+    else
+        m_finishInfo = tr("Done in %1").arg(duration);
+
     if (m_requestPending) {
         // The job view is still being created; it is terminated as soon as it exists.
         m_finishPending = true;
@@ -166,6 +186,7 @@ void DesktopProgress::finish(bool cancelled, const QString &errorMessage)
         m_finishMessage = errorMessage;
         return;
     }
+    sendUpdate({{QStringLiteral("infoMessage"), m_finishInfo}});
     terminateJob(code, errorMessage, false);
     m_active = false;
 }
@@ -194,10 +215,17 @@ void DesktopProgress::flush()
     // Milliseconds since the start, like KJob::elapsedTime(). The keys of the map are sent in alphabetical
     // order, so Plasma has it before "processedBytes" when it computes the average speed.
     m_pending.insert(QStringLiteral("elapsedTime"), qlonglong(m_elapsed.elapsed()));
-    QDBusMessage update = QDBusMessage::createMethodCall(m_jobService, m_jobPath, kJobInterface, QStringLiteral("update"));
-    update << m_pending;
-    QDBusConnection::sessionBus().asyncCall(update);
+    sendUpdate(m_pending);
     m_pending.clear();
+}
+
+void DesktopProgress::sendUpdate(const QVariantMap &properties)
+{
+    if (m_jobPath.isEmpty())
+        return;
+    QDBusMessage update = QDBusMessage::createMethodCall(m_jobService, m_jobPath, kJobInterface, QStringLiteral("update"));
+    update << properties;
+    QDBusConnection::sessionBus().asyncCall(update);
 }
 
 void DesktopProgress::sendLauncherEntry(double progress, bool visible)

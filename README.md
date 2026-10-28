@@ -180,9 +180,16 @@ While a transfer runs, its progress is also shown
   amount copied, the elapsed time and the total size are sent as numbers; the total size is measured
   in the background before the copy (rsync does not report it), so with a remote source there is no
   graph. Files that are already up to date in the destination count in the total but are not copied,
-  so the graph may end before the right edge.
+  so the graph may end before the right edge. When the job ends, the notification shows a summary
+  ("24,0 GiB in 0:00:57", "Cancelled after …" or the error).
 
 On other desktops or without a session bus this does nothing.
+
+![The Plasma notification with the speed graph (Details expanded)](docs/screenshots/rsync-gui-notification.png)
+![The finished notification](docs/screenshots/rsync-gui-notification-finished.png)
+
+These two screenshots are taken by hand (a real 24 GB copy, *Details* expanded), not by
+`tools/make-screenshots.sh`.
 
 ## Close when finished
 

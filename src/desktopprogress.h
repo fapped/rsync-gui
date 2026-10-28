@@ -42,6 +42,7 @@ private:
     void flush();
     void sendLauncherEntry(double progress, bool visible);
     void terminateJob(uint errorCode, const QString &errorMessage, bool blocking);
+    void sendUpdate(const QVariantMap &properties);
 
     QString m_appUri;       // application://rsync-gui.desktop
     QString m_jobService;   // the owner of the job view, known after requestView() returns
@@ -50,10 +51,12 @@ private:
     QTimer m_updateTimer;
     QElapsedTimer m_elapsed; // Plasma's "Average Speed" is processedBytes / elapsedTime
     double m_progress = 0.0;
+    qint64 m_processedBytes = 0; // the last amount sent, for the summary line at the end
     bool m_progressChanged = false;
     bool m_active = false;
     bool m_requestPending = false; // requestView() has not returned yet
     bool m_finishPending = false; // finish() was called before the job view was created
     uint m_finishCode = 0;
     QString m_finishMessage;
+    QString m_finishInfo; // the summary line shown in the finished notification
 };
