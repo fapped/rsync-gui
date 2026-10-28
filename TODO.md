@@ -17,11 +17,10 @@
 - [x] Dolphin context menu (*Rsync* submenu: Copy to…, Copy and verify to…), installed by CMake
       with the absolute program path
 - [x] Installed to `~/.local`; the older service menu removed
+- [x] Dolphin menu checked on the live system by the user (2026-10-28)
 
 ## To do
 
-- [ ] Click through the Dolphin menu on the live system (installed to `~/.local` on 2026-10-25,
-      the installed Exec line was started manually and works)
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] "Move to…" Dolphin action (`--remove-source-files` + removing emptied source directories)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
