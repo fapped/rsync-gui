@@ -37,6 +37,7 @@
 #include <QStorageInfo>
 #include <QTabWidget>
 #include <QtConcurrent/QtConcurrentRun>
+#include <QTime>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -1257,9 +1258,14 @@ void MainWindow::appendLog(RsyncJob::LogLevel level, const QString &text)
     case RsyncJob::LogLevel::Output:
         break;
     }
-    const QString escaped = text.toHtmlEscaped();
-    m_log->appendHtml(color.isEmpty() ? escaped
-                                      : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped));
+    // Every line starts with the time (in grey), also every line of a multi-line message.
+    const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    const QString timeHtml = QStringLiteral("<span style=\"color:#888888\">%1</span> ").arg(time);
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        const QString escaped = line.toHtmlEscaped();
+        m_log->appendHtml(timeHtml + (color.isEmpty() ? escaped
+                                                      : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped)));
+    }
 }
 
 void MainWindow::onJobFinished()
