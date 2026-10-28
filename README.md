@@ -23,7 +23,7 @@ be passed as additional arguments.
 - **verification after copying**: a second rsync pass that compares checksums of the source and the
   destination and lists every file that differs or is missing,
 - preview of the generated command, progress bar (per file or overall), speed and ETA, a log with
-  the time of every line,
+  the time of every line (the date in the line that starts a run and when the day changes),
   cancellation, confirmation only for options that delete files, optional **closing the window
   when the transfer finishes** successfully,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the

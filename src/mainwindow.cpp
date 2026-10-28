@@ -37,7 +37,7 @@
 #include <QStorageInfo>
 #include <QTabWidget>
 #include <QtConcurrent/QtConcurrentRun>
-#include <QTime>
+#include <QDateTime>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -1164,8 +1164,9 @@ void MainWindow::startCopy()
         appendLog(RsyncJob::LogLevel::Warning, note);
     for (const QString &missing : std::as_const(plan.missing))
         appendLog(RsyncJob::LogLevel::Warning, tr("Skipped missing source: %1").arg(LocalPath::display(missing)));
-    appendLog(RsyncJob::LogLevel::Info,
-              tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())));
+    appendLogLines(RsyncJob::LogLevel::Info,
+                   tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())),
+                   true);
     // Without progress output from rsync the bar can only show that something is happening.
     if (options.progress == RsyncOptions::Progress::None && !options.canVerify())
         m_progress->setRange(0, 0);
@@ -1243,6 +1244,11 @@ void MainWindow::cancelCopy()
 
 void MainWindow::appendLog(RsyncJob::LogLevel level, const QString &text)
 {
+    appendLogLines(level, text, false);
+}
+
+void MainWindow::appendLogLines(RsyncJob::LogLevel level, const QString &text, bool withDate)
+{
     QString color;
     switch (level) {
     case RsyncJob::LogLevel::Error:
@@ -1258,8 +1264,16 @@ void MainWindow::appendLog(RsyncJob::LogLevel level, const QString &text)
     case RsyncJob::LogLevel::Output:
         break;
     }
-    // Every line starts with the time (in grey), also every line of a multi-line message.
-    const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    // Every line starts with the time (in grey), also every line of a multi-line message. The date is
+    // in the line that starts a run and in a line of its own when the day changes (e.g. after midnight).
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString date = now.date().toString(Qt::ISODate);
+    if (m_logDate.isValid() && now.date() != m_logDate && !withDate)
+        m_log->appendHtml(QStringLiteral("<span style=\"color:#888888\">--- %1 ---</span>").arg(date));
+    m_logDate = now.date();
+    QString time = now.time().toString(QStringLiteral("HH:mm:ss"));
+    if (withDate)
+        time = date + QLatin1Char(' ') + time;
     const QString timeHtml = QStringLiteral("<span style=\"color:#888888\">%1</span> ").arg(time);
     for (const QString &line : text.split(QLatin1Char('\n'))) {
         const QString escaped = line.toHtmlEscaped();

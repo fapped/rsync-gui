@@ -5,6 +5,7 @@
 #include "rsyncjob.h"
 #include "rsyncoptions.h"
 
+#include <QDate>
 #include <QMainWindow>
 #include <QPointer>
 
@@ -91,6 +92,8 @@ private:
     void measureSourcesForDesktopProgress(const RsyncOptions &options);
     void stopMeasuringSources();
     void appendLog(RsyncJob::LogLevel level, const QString &text);
+    // `withDate`: the line starts with the date too (the start of a run).
+    void appendLogLines(RsyncJob::LogLevel level, const QString &text, bool withDate);
     void onJobFinished();
 
     QString settingsDialogDir() const;
@@ -157,6 +160,7 @@ private:
     QPlainTextEdit *m_log = nullptr;
 
     QPointer<RsyncJob> m_job;
+    QDate m_logDate; // the date of the last log line - a new day gets a line of its own
     DesktopProgress *m_desktopProgress = nullptr;
     std::shared_ptr<std::atomic_bool> m_measureCancel; // stops measuring the sources
     // False while the options come from a preset or a --config file: they are not remembered.
