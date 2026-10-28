@@ -1,4 +1,5 @@
 #include "location.h"
+#include "localpath.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -41,7 +42,7 @@ Location Location::parse(const QString &text)
         return loc;
 
     if (s.startsWith(QStringLiteral("file://"))) {
-        s = QUrl(s).toLocalFile();
+        s = LocalPath::fromFileUrl(s);
     } else if (s.startsWith(QStringLiteral("sftp://")) || s.startsWith(QStringLiteral("ssh://"))) {
         const QUrl url(s);
         if (!url.isValid() || url.host().isEmpty())
@@ -50,7 +51,7 @@ Location Location::parse(const QString &text)
         loc.host = url.host();
         loc.port = qMax(0, url.port(0));
         // Dolphin uses "sftp://host/~/dir" for paths relative to the home directory.
-        QString path = url.path(QUrl::FullyDecoded);
+        QString path = LocalPath::fromUrlPath(url.path(QUrl::FullyEncoded));
         if (path.startsWith(QStringLiteral("/~/")))
             path = path.mid(3);
         else if (path == QStringLiteral("/~"))
@@ -98,8 +99,10 @@ QString Location::toString() const
     url.setUserName(user);
     url.setHost(host);
     url.setPort(port);
-    url.setPath(path.startsWith(QLatin1Char('/')) ? path : QStringLiteral("/~/") + path);
-    return url.toString();
+    const QString urlPath = path.startsWith(QLatin1Char('/')) ? path : QStringLiteral("/~/") + path;
+    // Percent-encode the exact bytes, so that names that are not valid UTF-8 survive the URL.
+    url.setPath(QString::fromLatin1(LocalPath::encode(urlPath).toPercentEncoding("/~")), QUrl::StrictMode);
+    return url.toString(); // readable; bytes that are not valid UTF-8 stay percent-encoded
 }
 
 QString Location::originKey() const

@@ -265,6 +265,18 @@ the list, presets are not listed there (they have *Load preset*).
 - Exit code 24 (some source files vanished during the transfer) is reported as a warning,
   other non-zero exit codes as errors, with the meaning of the code.
 
+## File names that are not valid UTF-8
+
+Linux file names are bytes, and old files (e.g. from Windows/Latin-1 times or broken archives) may
+contain bytes that are not valid UTF-8. Rsync GUI keeps such names exactly — from the command line
+(Dolphin), `file://` URLs, drag & drop and the clipboard — and passes the exact bytes to rsync.
+They are shown with `\xNN` escapes (e.g. `caf\xe9`), and the command preview uses bash's `$'...'`
+quoting, so it can be pasted into a terminal. rsync itself shows them as `\#351` in its output.
+Names inside source directories were never a problem (rsync reads them itself).
+
+Only the file dialogs (*Add files…*, *Browse…*) cannot return such names — Qt converts them on the
+way; use Dolphin, drag & drop or paste instead.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

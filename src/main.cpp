@@ -1,3 +1,4 @@
+#include "localpath.h"
 #include "mainwindow.h"
 #include "rsyncoptions.h"
 
@@ -44,7 +45,12 @@ int main(int argc, char *argv[])
     parser.addPositionalArgument(QStringLiteral("sources"),
                                  QStringLiteral("Files or directories to copy (paths, file:// or sftp:// URLs)."),
                                  QStringLiteral("[sources...]"));
-    parser.process(app);
+    // QCoreApplication::arguments() would replace bytes that are not valid UTF-8 in file names;
+    // the raw argv (Qt's own options already removed by QApplication) is decoded losslessly.
+    QStringList arguments;
+    for (int i = 0; i < argc; ++i)
+        arguments << LocalPath::decode(QByteArray(argv[i]));
+    parser.process(arguments);
 
     if (parser.isSet(listPresetsOption)) {
         const QList<RsyncPreset> presets = RsyncOptions::presets();

@@ -107,6 +107,7 @@ private:
 
     void startNext();
     void startProcess();
+    void setRawArguments(QProcess *process, const QStringList &args) const;
     void onReadyRead();
     void handleLine(const QString &line);
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);

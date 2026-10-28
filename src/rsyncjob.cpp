@@ -1,16 +1,20 @@
 #include "rsyncjob.h"
+#include "localpath.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <vector>
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -20,14 +24,12 @@ namespace {
 
 bool localExists(const QString &path)
 {
-    const QFileInfo info(path);
-    return info.exists() || info.isSymLink(); // a dangling symlink is still copied as a symlink
+    return LocalPath::info(path).exists; // also a dangling symlink, it is copied as a symlink
 }
 
 QString canonicalOrClean(const QString &path)
 {
-    const QString canonical = QFileInfo(path).canonicalFilePath();
-    return canonical.isEmpty() ? QDir::cleanPath(path) : canonical;
+    return LocalPath::canonical(path);
 }
 
 bool isInside(const QString &path, const QString &dir)
@@ -99,9 +101,10 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
                 continue;
             }
             const QString canonical = canonicalOrClean(source.path);
-            const bool isDir = QFileInfo(source.path).isDir() && !QFileInfo(source.path).isSymLink();
+            const bool isDir = LocalPath::info(source.path).isDir;
             if (isDir && !destination.isRemote() && isInside(destCanonical, canonical)) {
-                errors << tr("The destination %1 is inside the source directory %2.").arg(destination.path, source.path);
+                errors << tr("The destination %1 is inside the source directory %2.")
+                              .arg(LocalPath::display(destination.path), LocalPath::display(source.path));
                 continue;
             }
             if (isDir && options.contentsOnly && !spec.endsWith(QLatin1Char('/')))
@@ -112,7 +115,7 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
 
         const QString key = source.originKey() + QLatin1Char('\n') + spec;
         if (seen.contains(key)) {
-            result.notes << tr("Duplicate source skipped: %1").arg(source.toString());
+            result.notes << tr("Duplicate source skipped: %1").arg(LocalPath::display(source.toString()));
             continue;
         }
         seen << key;
@@ -141,7 +144,8 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
         result.error = errors.join(QLatin1Char('\n'));
     else if (result.transfers.isEmpty())
         result.error = result.missing.isEmpty() ? tr("No sources selected.")
-                                                : tr("None of the sources exists:\n%1").arg(result.missing.join(QLatin1Char('\n')));
+                                                : tr("None of the sources exists:\n%1")
+                                                      .arg(LocalPath::display(result.missing.join(QLatin1Char('\n'))));
     return result;
 }
 
@@ -289,7 +293,32 @@ void RsyncJob::startProcess()
     connect(m_process, &QProcess::readyRead, this, &RsyncJob::onReadyRead);
     connect(m_process, &QProcess::finished, this, &RsyncJob::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &RsyncJob::onProcessError);
+    setRawArguments(m_process, args);
     m_process->start(m_options.program, args);
+}
+
+void RsyncJob::setRawArguments(QProcess *process, const QStringList &args) const
+{
+    // QProcess passes arguments as UTF-8, which would change file names that are not valid UTF-8
+    // (see LocalPath). For such arguments the child process execs rsync itself with the exact bytes;
+    // if that fails, QProcess continues with its own exec, which then fails the same way.
+    if (std::all_of(args.cbegin(), args.cend(), [](const QString &arg) { return LocalPath::isPlain(arg); }))
+        return;
+    const QString program = m_options.program.contains(QLatin1Char('/'))
+        ? m_options.program
+        : QStandardPaths::findExecutable(m_options.program);
+    if (program.isEmpty())
+        return;
+    auto bytes = std::make_shared<std::vector<QByteArray>>();
+    bytes->push_back(LocalPath::encode(program));
+    for (const QString &arg : args)
+        bytes->push_back(LocalPath::encode(arg));
+    auto argv = std::make_shared<std::vector<char *>>();
+    for (QByteArray &arg : *bytes)
+        argv->push_back(arg.data()); // detached here, in the parent
+    argv->push_back(nullptr);
+    // Runs in the child after fork(); only async-signal-safe calls.
+    process->setChildProcessModifier([bytes, argv] { ::execv(argv->front(), argv->data()); });
 }
 
 void RsyncJob::onReadyRead()
@@ -450,7 +479,7 @@ void RsyncJob::onProcessError(QProcess::ProcessError error)
 
 int RsyncJob::removeEmptyDirectories(const QString &dir, bool keepTop, QStringList *left)
 {
-    const QByteArray root = QFile::encodeName(dir);
+    const QByteArray root = LocalPath::encode(dir);
     struct stat rootStat;
     if (::lstat(root.constData(), &rootStat) != 0 || !S_ISDIR(rootStat.st_mode))
         return 0;
@@ -469,7 +498,7 @@ int RsyncJob::removeEmptyDirectories(const QString &dir, bool keepTop, QStringLi
                     if (st.st_dev == rootStat.st_dev)
                         subdirs << child;
                     else if (left)
-                        *left << QFile::decodeName(child); // a mount point - never removed
+                        *left << LocalPath::decode(child); // a mount point - never removed
                 }
             }
             ::closedir(d);
@@ -484,7 +513,7 @@ int RsyncJob::removeEmptyDirectories(const QString &dir, bool keepTop, QStringLi
         }
         // Report only the outermost directories that stay (their parents stay anyway).
         if (left && errno != ENOENT) {
-            const QString name = QFile::decodeName(path);
+            const QString name = LocalPath::decode(path);
             left->erase(std::remove_if(left->begin(), left->end(),
                                        [&](const QString &l) { return l.startsWith(name + QLatin1Char('/')); }),
                         left->end());
@@ -506,9 +535,9 @@ void RsyncJob::removeEmptiedSourceDirs(const Transfer &transfer)
         const int removed = removeEmptyDirectories(dir, m_options.contentsOnly, &left);
         m_summary.sourceDirsRemoved += removed;
         if (removed > 0)
-            emit log(LogLevel::Info, tr("Removed %1 emptied source director(y/ies) in %2").arg(removed).arg(dir));
+            emit log(LogLevel::Info, tr("Removed %1 emptied source director(y/ies) in %2").arg(removed).arg(LocalPath::display(dir)));
         for (const QString &path : std::as_const(left))
-            emit log(LogLevel::Warning, tr("Source directory not empty - left in place: %1").arg(path));
+            emit log(LogLevel::Warning, tr("Source directory not empty - left in place: %1").arg(LocalPath::display(path)));
     }
 }
 

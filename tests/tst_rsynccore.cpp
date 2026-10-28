@@ -1,3 +1,4 @@
+#include "localpath.h"
 #include "location.h"
 #include "rsyncjob.h"
 #include "rsyncoptions.h"
@@ -11,9 +12,15 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QRandomGenerator>
+#include <QScopeGuard>
 #include <QTest>
 
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <utime.h>
 
 namespace {
@@ -47,6 +54,49 @@ bool runJob(RsyncJob &job)
     QSignalSpy spy(&job, &RsyncJob::finished);
     job.start();
     return spy.count() > 0 || spy.wait(60000);
+}
+
+// Files with names that are not valid UTF-8 are created and read with raw bytes.
+void writeRaw(const QByteArray &path, const QByteArray &data)
+{
+    const int fd = ::open(path.constData(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    QVERIFY(fd >= 0);
+    QCOMPARE(::write(fd, data.constData(), data.size()), ssize_t(data.size()));
+    ::close(fd);
+}
+
+QByteArray readRaw(const QByteArray &path)
+{
+    const int fd = ::open(path.constData(), O_RDONLY);
+    if (fd < 0)
+        return "<missing>";
+    QByteArray data(4096, '\0');
+    const ssize_t n = ::read(fd, data.data(), data.size());
+    ::close(fd);
+    return data.left(qMax<ssize_t>(0, n));
+}
+
+// QTemporaryDir cannot remove such names (Qt converts them), so they are removed with raw bytes.
+void removeTree(const QByteArray &path)
+{
+    struct stat st;
+    if (::lstat(path.constData(), &st) != 0)
+        return;
+    if (S_ISDIR(st.st_mode)) {
+        if (DIR *d = ::opendir(path.constData())) {
+            QList<QByteArray> children;
+            while (dirent *entry = ::readdir(d)) {
+                if (std::strcmp(entry->d_name, ".") != 0 && std::strcmp(entry->d_name, "..") != 0)
+                    children << path + '/' + entry->d_name;
+            }
+            ::closedir(d);
+            for (const QByteArray &child : std::as_const(children))
+                removeTree(child);
+        }
+        ::rmdir(path.constData());
+    } else {
+        ::unlink(path.constData());
+    }
 }
 
 bool haveRsync()
@@ -107,6 +157,11 @@ private slots:
     void removeEmptyDirectories();
     void moveRemovesEmptiedDirectories();
     void missingProgramAborts();
+    void localPathRoundTrip_data();
+    void localPathRoundTrip();
+    void localPathRandomRoundTrip();
+    void localPathUrlsAndQuoting();
+    void copyNonUtf8Names();
     void jsonRoundTrip();
     void jsonMissingKeysKeepBase();
     void jsonRejectsInvalidValues_data();
@@ -749,6 +804,108 @@ void TestRsyncCore::moveRemovesEmptiedDirectories()
     QVERIFY(runJob(plain));
     QVERIFY(QFileInfo(tmp.filePath("plain/y")).isDir());
     QCOMPARE(plain.summary().sourceDirsRemoved, 0);
+}
+
+void TestRsyncCore::localPathRoundTrip_data()
+{
+    QTest::addColumn<QByteArray>("bytes");
+    QTest::addColumn<bool>("plain");
+    QTest::addColumn<QString>("display");
+
+    QTest::newRow("ascii") << QByteArray("/tmp/a b") << true << "/tmp/a b";
+    QTest::newRow("utf-8") << QByteArray("/tmp/na\xc3\xafve") << true << QString::fromUtf8("/tmp/naïve");
+    QTest::newRow("emoji") << QByteArray("\xf0\x9f\x98\x80") << true << QString::fromUtf8("\xf0\x9f\x98\x80");
+    QTest::newRow("latin-1 byte") << QByteArray("/tmp/caf\xe9") << false << "/tmp/caf\\xe9";
+    QTest::newRow("0xff") << QByteArray("\xff\xfe") << false << "\\xff\\xfe";
+    QTest::newRow("overlong") << QByteArray("\xc0\xaf") << false << "\\xc0\\xaf";
+    QTest::newRow("surrogate") << QByteArray("\xed\xa0\x80") << false << "\\xed\\xa0\\x80";
+    QTest::newRow("truncated") << QByteArray("a\xe2\x82") << false << "a\\xe2\\x82";
+    QTest::newRow("above U+10FFFF") << QByteArray("\xf4\x90\x80\x80") << false << "\\xf4\\x90\\x80\\x80";
+    // U+F780..U+F7FF are the escape characters themselves - stored escaped, so they survive too.
+    QTest::newRow("escape range") << QByteArray("\xef\x9e\x80") << false << "\\xef\\x9e\\x80";
+    QTest::newRow("empty") << QByteArray() << true << "";
+}
+
+void TestRsyncCore::localPathRoundTrip()
+{
+    QFETCH(QByteArray, bytes);
+    QFETCH(bool, plain);
+    QFETCH(QString, display);
+    const QString decoded = LocalPath::decode(bytes);
+    QCOMPARE(LocalPath::encode(decoded), bytes);
+    QCOMPARE(LocalPath::isPlain(decoded), plain);
+    QCOMPARE(LocalPath::display(decoded), display);
+    if (plain)
+        QCOMPARE(decoded, QString::fromUtf8(bytes));
+}
+
+void TestRsyncCore::localPathRandomRoundTrip()
+{
+    QRandomGenerator random(20261028);
+    for (int i = 0; i < 20000; ++i) {
+        QByteArray bytes(int(random.bounded(24)), '\0');
+        for (char &c : bytes)
+            c = char(random.bounded(i % 2 ? 256 : 64) + (i % 2 ? 0 : 0xC0)); // half biased to UTF-8 lead bytes
+        QCOMPARE(LocalPath::encode(LocalPath::decode(bytes)), bytes);
+    }
+}
+
+void TestRsyncCore::localPathUrlsAndQuoting()
+{
+    // file:// URLs (Dolphin, drag & drop, clipboard) keep the bytes - QUrl::toLocalFile() would not.
+    const Location local = Location::parse(QStringLiteral("file:///tmp/a%FFb%20c"));
+    QCOMPARE(LocalPath::encode(local.path), QByteArray("/tmp/a\xff" "b c"));
+    const Location remote = Location::parse(QStringLiteral("sftp://me@nas:2222/data/x%FE"));
+    QCOMPARE(LocalPath::encode(remote.path), QByteArray("/data/x\xfe"));
+    QCOMPARE(Location::parse(remote.toString()), remote);
+    QCOMPARE(Location::parse(local.toString()), local);
+
+    // The command preview uses bash's $'...' for such names, so it can be pasted into a shell.
+    QCOMPARE(shellQuote(LocalPath::decode("/tmp/a\xff'b\\c")), QStringLiteral("$'/tmp/a\\xff\\'b\\\\c'"));
+}
+
+void TestRsyncCore::copyNonUtf8Names()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray base = QFile::encodeName(tmp.path());
+    const auto cleanup = qScopeGuard([&] { removeTree(base + "/src\xff"); removeTree(base + "/out\xfc"); });
+    const QByteArray src = base + "/src\xff";
+    QCOMPARE(::mkdir(src.constData(), 0755), 0);
+    QCOMPARE(::mkdir((src + "/sub\xfd").constData(), 0755), 0);
+    writeRaw(src + "/f\xfe.txt", "data");
+    writeRaw(src + "/sub\xfd/g", "more");
+
+    const QString source = LocalPath::decode(src);
+    QVERIFY(LocalPath::info(source).isDir);
+    QCOMPARE(LocalPath::canonical(source), source);
+    const QString dest = LocalPath::decode(base + "/out\xfc/deeper");
+    QVERIFY(LocalPath::makePath(dest));
+    QVERIFY(LocalPath::isDirectory(dest));
+
+    // Copy with verification: both rsync runs get the exact bytes.
+    RsyncOptions options = testOptions();
+    options.verifyAfter = true;
+    const RsyncJob::Plan plan = RsyncJob::plan({Location::parse(source)}, Location::parse(dest), options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(job.summary().verified, 1);
+    QCOMPARE(readRaw(base + "/out\xfc/deeper/src\xff/f\xfe.txt"), QByteArray("data"));
+    QCOMPARE(readRaw(base + "/out\xfc/deeper/src\xff/sub\xfd/g"), QByteArray("more"));
+
+    // Move: the source files and the emptied directories (also with such names) are removed.
+    options.verifyAfter = false;
+    options.removeSourceFiles = true;
+    options.removeSourceDirs = true;
+    RsyncJob move(RsyncJob::plan({Location::parse(source)}, Location::parse(dest), options).transfers, options);
+    QVERIFY(runJob(move));
+    QVERIFY(move.summary().ok());
+    QCOMPARE(move.summary().sourceDirsRemoved, 2);
+    QVERIFY(!LocalPath::info(source).exists);
 }
 
 void TestRsyncCore::missingProgramAborts()

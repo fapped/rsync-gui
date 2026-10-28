@@ -14,6 +14,7 @@ include(GNUInstallDirs)
 
 # GUI-independent logic (options, locations, running rsync) - used by the application and the tests.
 add_library(rsynccore STATIC
+    src/localpath.h src/localpath.cpp
     src/location.h src/location.cpp
     src/rsyncoptions.h src/rsyncoptions.cpp
     src/rsyncjob.h src/rsyncjob.cpp

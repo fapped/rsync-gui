@@ -1,4 +1,5 @@
 #include "rsyncoptions.h"
+#include "localpath.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -523,6 +524,12 @@ bool RsyncOptions::operator==(const RsyncOptions &other) const
 
 QString shellQuote(const QString &arg)
 {
+    if (!LocalPath::isPlain(arg)) {
+        // Bytes that are not valid UTF-8: bash's $'...' quoting with \xNN keeps them exact.
+        QString quoted = LocalPath::display(QString(arg).replace(QLatin1Char('\\'), QStringLiteral("\\\\")));
+        quoted.replace(QLatin1Char('\''), QStringLiteral("\\'"));
+        return QStringLiteral("$'") + quoted + QLatin1Char('\'');
+    }
     static const QRegularExpression safe(QStringLiteral("^[A-Za-z0-9_@%+=:,./-]+$"));
     if (!arg.isEmpty() && safe.match(arg).hasMatch())
         return arg;

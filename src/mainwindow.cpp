@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "localpath.h"
 
 #include <QAction>
 #include <QApplication>
@@ -669,7 +670,7 @@ void MainWindow::addSources(const QStringList &paths)
         const Location loc = Location::parse(raw);
         if (!loc.isValid() || existing.contains(loc.toString()))
             continue;
-        auto *item = new QListWidgetItem(loc.toString(), m_sourceList);
+        auto *item = new QListWidgetItem(LocalPath::display(loc.toString()), m_sourceList);
         item->setData(kLocationRole, loc.toString());
         refreshSourceItem(item);
         existing << loc.toString();
@@ -710,17 +711,17 @@ void MainWindow::refreshSourceItem(QListWidgetItem *item)
         icon = QStringLiteral("folder-network");
         tooltip = tr("remote (%1 over ssh)").arg(loc.port > 0 ? tr("%1, port %2").arg(loc.host).arg(loc.port) : loc.host);
     } else {
-        const QFileInfo info(loc.path);
-        if (info.isSymLink()) {
+        const LocalPath::Info info = LocalPath::info(loc.path);
+        if (info.isSymLink) {
             icon = QStringLiteral("emblem-symbolic-link");
-            tooltip = tr("symbolic link to %1 (copied as a link in archive mode)").arg(info.symLinkTarget());
-        } else if (info.isDir()) {
+            tooltip = tr("symbolic link to %1 (copied as a link in archive mode)").arg(LocalPath::display(info.symLinkTarget));
+        } else if (info.isDir) {
             icon = QStringLiteral("folder");
             tooltip = tr("directory");
-        } else if (info.isFile()) {
+        } else if (info.isFile) {
             icon = QStringLiteral("text-x-generic");
-            tooltip = tr("file, %1").arg(QLocale().formattedDataSize(info.size()));
-        } else if (info.exists()) {
+            tooltip = tr("file, %1").arg(QLocale().formattedDataSize(info.size));
+        } else if (info.exists) {
             icon = QStringLiteral("drive-harddisk");
             tooltip = tr("special file");
         } else {
@@ -728,6 +729,8 @@ void MainWindow::refreshSourceItem(QListWidgetItem *item)
             tooltip = tr("does not exist");
         }
     }
+    if (!LocalPath::isPlain(loc.path))
+        tooltip += tr("\nThe name is not valid UTF-8 - shown with \\x escapes, copied with the exact bytes.");
     item->setIcon(QIcon::fromTheme(icon));
     item->setToolTip(tooltip);
 }
@@ -762,10 +765,10 @@ void MainWindow::updateSourceInfo()
             ++remote;
             continue;
         }
-        const QFileInfo info(loc.path);
-        if (!info.exists() && !info.isSymLink())
+        const LocalPath::Info info = LocalPath::info(loc.path);
+        if (!info.exists)
             ++missing;
-        else if (info.isDir() && !info.isSymLink())
+        else if (info.isDir)
             ++dirs;
         else
             ++files;
@@ -788,16 +791,18 @@ void MainWindow::updateDestinationInfo()
         text = tr("Remote destination on %1 (over ssh). rsync creates the last directory of the path if it is missing.")
                    .arg(dest.host);
     } else {
-        const QFileInfo info(dest.path);
-        if (info.isDir()) {
-            const QStorageInfo storage(dest.path);
-            text = storage.isValid() ? tr("Existing directory, %1 free.").arg(QLocale().formattedDataSize(storage.bytesAvailable()))
-                                     : tr("Existing directory.");
-        } else if (info.exists()) {
-            text = tr("<b>Not a directory:</b> %1").arg(dest.path.toHtmlEscaped());
+        if (LocalPath::isDirectory(dest.path)) {
+            const QStorageInfo storage(LocalPath::isPlain(dest.path) ? dest.path : QString());
+            text = storage.isValid() && LocalPath::isPlain(dest.path)
+                ? tr("Existing directory, %1 free.").arg(QLocale().formattedDataSize(storage.bytesAvailable()))
+                : tr("Existing directory.");
+        } else if (LocalPath::info(dest.path).exists) {
+            text = tr("<b>Not a directory:</b> %1").arg(LocalPath::display(dest.path).toHtmlEscaped());
         } else {
-            text = tr("The directory %1 does not exist - it will be created.").arg(dest.path);
+            text = tr("The directory %1 does not exist - it will be created.").arg(LocalPath::display(dest.path));
         }
+        if (!LocalPath::isPlain(dest.path))
+            text += tr(" (%1)").arg(LocalPath::display(dest.path));
     }
     m_destinationInfo->setText(text);
 }
@@ -865,10 +870,9 @@ QStringList MainWindow::pathsFromMimeData(const QMimeData *mime)
         return paths;
     if (mime->hasUrls()) {
         for (const QUrl &url : mime->urls()) {
-            if (url.isLocalFile())
-                paths << url.toLocalFile();
-            else if (url.scheme() == QStringLiteral("sftp"))
-                paths << url.toString();
+            // Encoded URLs keep the exact bytes of names that are not valid UTF-8 (see LocalPath).
+            if (url.isLocalFile() || url.scheme() == QStringLiteral("sftp"))
+                paths << url.toString(QUrl::FullyEncoded);
         }
     } else {
         paths = mime->text().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -917,11 +921,11 @@ void MainWindow::browseDestination()
     // Start in the current destination, or next to the first local source (like a file manager would).
     QString start;
     const Location dest = destination();
-    if (dest.isValid() && !dest.isRemote() && QFileInfo(dest.path).isDir())
+    if (dest.isValid() && !dest.isRemote() && LocalPath::isDirectory(dest.path))
         start = dest.path;
     if (start.isEmpty() && m_destinationCombo->count() > 0) {
         const Location recent = Location::parse(m_destinationCombo->itemText(0));
-        if (!recent.isRemote() && QFileInfo(recent.path).isDir())
+        if (!recent.isRemote() && LocalPath::isDirectory(recent.path))
             start = recent.path;
     }
     if (start.isEmpty()) {
@@ -1062,9 +1066,8 @@ void MainWindow::startCopy()
         return;
     }
     if (!dest.isRemote()) {
-        const QFileInfo info(dest.path);
-        if (info.exists() && !info.isDir()) {
-            QMessageBox::warning(this, tr("Invalid destination"), tr("%1 is not a directory.").arg(dest.path));
+        if (LocalPath::info(dest.path).exists && !LocalPath::isDirectory(dest.path)) {
+            QMessageBox::warning(this, tr("Invalid destination"), tr("%1 is not a directory.").arg(LocalPath::display(dest.path)));
             return;
         }
     }
@@ -1077,18 +1080,19 @@ void MainWindow::startCopy()
     if (!plan.missing.isEmpty()) {
         const auto answer = QMessageBox::question(
             this, tr("Some sources do not exist"),
-            tr("These sources do not exist:\n%1\n\nContinue without them?").arg(plan.missing.join(QLatin1Char('\n'))));
+            tr("These sources do not exist:\n%1\n\nContinue without them?")
+                .arg(LocalPath::display(plan.missing.join(QLatin1Char('\n')))));
         if (answer != QMessageBox::Yes)
             return;
     }
 
-    if (!dest.isRemote() && !QFileInfo(dest.path).exists() && !options.dryRun) {
+    if (!dest.isRemote() && !LocalPath::info(dest.path).exists && !options.dryRun) {
         const auto answer = QMessageBox::question(this, tr("Create destination"),
-                                                  tr("The directory %1 does not exist. Create it?").arg(dest.path));
+                                                  tr("The directory %1 does not exist. Create it?").arg(LocalPath::display(dest.path)));
         if (answer != QMessageBox::Yes)
             return;
-        if (!QDir().mkpath(dest.path)) {
-            QMessageBox::warning(this, tr("Create destination"), tr("Cannot create the directory %1.").arg(dest.path));
+        if (!LocalPath::makePath(dest.path)) {
+            QMessageBox::warning(this, tr("Create destination"), tr("Cannot create the directory %1.").arg(LocalPath::display(dest.path)));
             return;
         }
     }
@@ -1144,8 +1148,9 @@ void MainWindow::startCopy()
     for (const QString &note : std::as_const(plan.notes))
         appendLog(RsyncJob::LogLevel::Warning, note);
     for (const QString &missing : std::as_const(plan.missing))
-        appendLog(RsyncJob::LogLevel::Warning, tr("Skipped missing source: %1").arg(missing));
-    appendLog(RsyncJob::LogLevel::Info, tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(dest.toString()));
+        appendLog(RsyncJob::LogLevel::Warning, tr("Skipped missing source: %1").arg(LocalPath::display(missing)));
+    appendLog(RsyncJob::LogLevel::Info,
+              tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())));
     // Without progress output from rsync the bar can only show that something is happening.
     if (options.progress == RsyncOptions::Progress::None && !options.canVerify())
         m_progress->setRange(0, 0);
@@ -1159,12 +1164,14 @@ void MainWindow::startCopy()
 void MainWindow::startDesktopProgress(const RsyncOptions &options, const Location &dest)
 {
     const QList<Location> list = sources();
-    QString source = list.isEmpty() ? QString() : list.first().toString();
+    QString source = list.isEmpty() ? QString() : LocalPath::display(list.first().toString());
     if (list.size() > 1)
         source = tr("%1 (+%2 more)").arg(source).arg(list.size() - 1);
-    const QString destUrl = dest.isRemote() ? QString() : QUrl::fromLocalFile(dest.path).toString();
+    const QString destUrl = dest.isRemote()
+        ? QString()
+        : QStringLiteral("file://") + QString::fromLatin1(LocalPath::encode(dest.path).toPercentEncoding("/"));
     const QString title = options.dryRun ? tr("Dry run") : options.removeSourceFiles ? tr("Moving") : tr("Copying");
-    m_desktopProgress->start(title, source, dest.toString(), destUrl);
+    m_desktopProgress->start(title, source, LocalPath::display(dest.toString()), destUrl);
     connect(m_job, &RsyncJob::progress, m_desktopProgress, &DesktopProgress::setProgress);
     connect(m_job, &RsyncJob::statusChanged, m_desktopProgress, [this](QString status) {
         // Plasma shows the percentage itself; keep the size, speed and ETA.
@@ -1222,7 +1229,7 @@ void MainWindow::onJobFinished()
     if (currentOptions().removeSourceFiles && !currentOptions().dryRun) {
         for (int i = m_sourceList->count() - 1; i >= 0; --i) {
             const Location loc = Location::parse(m_sourceList->item(i)->data(kLocationRole).toString());
-            if (!loc.isRemote() && !QFileInfo(loc.path).exists() && !QFileInfo(loc.path).isSymLink())
+            if (!loc.isRemote() && !LocalPath::info(loc.path).exists)
                 delete m_sourceList->takeItem(i);
         }
     }
