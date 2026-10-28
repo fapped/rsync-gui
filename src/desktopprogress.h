@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 #include <QTimer>
@@ -24,6 +25,8 @@ public:
     void setProgress(int permille);
     // Numeric speed and amount - Plasma draws the speed graph of the job from them.
     void setSpeed(qint64 bytesPerSecond, qint64 processedBytes);
+    // The size of the whole job; Plasma's speed graph needs it (its x axis is the share of it).
+    void setTotalBytes(qint64 totalBytes);
     // Hides the progress and ends the job (a non-empty error message marks it as failed).
     void finish(bool cancelled, const QString &errorMessage = QString());
     bool isActive() const { return m_active; }
@@ -45,6 +48,7 @@ private:
     QString m_jobPath;
     QVariantMap m_pending;  // job properties not sent yet (updates are coalesced)
     QTimer m_updateTimer;
+    QElapsedTimer m_elapsed; // Plasma's "Average Speed" is processedBytes / elapsedTime
     double m_progress = 0.0;
     bool m_progressChanged = false;
     bool m_active = false;

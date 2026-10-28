@@ -4,6 +4,8 @@
 #include <QUrl>
 
 #include <cerrno>
+#include <cstring>
+#include <dirent.h>
 #include <climits>
 #include <cstdlib>
 #include <sys/stat.h>
@@ -161,6 +163,51 @@ QString canonical(const QString &path)
         return result;
     }
     return QDir::cleanPath(path);
+}
+
+namespace {
+
+qint64 sizeOf(const QByteArray &path, bool recursive, const std::atomic_bool *cancel)
+{
+    if (cancel && cancel->load())
+        return -1;
+    struct stat st;
+    if (::lstat(path.constData(), &st) != 0)
+        return 0;
+    if (S_ISREG(st.st_mode))
+        return st.st_size;
+    if (!S_ISDIR(st.st_mode) || !recursive) // rsync skips directories without -r
+        return 0;
+    DIR *d = ::opendir(path.constData());
+    if (!d)
+        return 0;
+    qint64 total = 0;
+    while (dirent *entry = ::readdir(d)) {
+        if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0)
+            continue;
+        const qint64 size = sizeOf(path + '/' + entry->d_name, recursive, cancel);
+        if (size < 0) {
+            total = -1;
+            break;
+        }
+        total += size;
+    }
+    ::closedir(d);
+    return total;
+}
+
+} // namespace
+
+qint64 totalSize(const QStringList &paths, bool recursive, const std::atomic_bool *cancel)
+{
+    qint64 total = 0;
+    for (const QString &path : paths) {
+        const qint64 size = sizeOf(encode(path), recursive, cancel);
+        if (size < 0)
+            return -1;
+        total += size;
+    }
+    return total;
 }
 
 bool makePath(const QString &path)

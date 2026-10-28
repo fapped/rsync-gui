@@ -175,8 +175,12 @@ While a transfer runs, its progress is also shown
   application),
 - as a job in the Plasma notification area (`org.kde.JobViewServerV2`): title (Copying / Verifying /
   Moving), source, destination, percentage, size, speed and ETA, a button that cancels the transfer,
-  and after it the result with a link to the destination. The speed (bytes/s) and the amount copied
-  are sent as numbers too, so Plasma can show them in its own format and draw the speed graph.
+  and after it the result with a link to the destination. Under *Details* Plasma draws a **speed
+  graph** with the current and the average speed, and shows "X of Y" copied. For that the speed, the
+  amount copied, the elapsed time and the total size are sent as numbers; the total size is measured
+  in the background before the copy (rsync does not report it), so with a remote source there is no
+  graph. Files that are already up to date in the destination count in the total but are not copied,
+  so the graph may end before the right edge.
 
 On other desktops or without a session bus this does nothing.
 

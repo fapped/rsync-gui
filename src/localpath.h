@@ -2,6 +2,9 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+
+#include <atomic>
 
 // Lossless local file names. Linux file names are bytes; Qt converts them to and from UTF-8, which
 // destroys names that are not valid UTF-8 (e.g. "\xff" becomes U+FFFD). Here every byte that is not
@@ -39,5 +42,9 @@ bool isDirectory(const QString &path);
 QString canonical(const QString &path);
 // mkdir -p; returns false if the directory could not be created.
 bool makePath(const QString &path);
+
+// The total size of the regular files in `paths` (directories recursively when `recursive`),
+// without following symlinks. Stops early, returning -1, once `*cancel` becomes true.
+qint64 totalSize(const QStringList &paths, bool recursive, const std::atomic_bool *cancel = nullptr);
 
 } // namespace LocalPath

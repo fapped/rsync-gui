@@ -8,6 +8,9 @@
 #include <QMainWindow>
 #include <QPointer>
 
+#include <atomic>
+#include <memory>
+
 class QAction;
 class QCheckBox;
 class QComboBox;
@@ -85,6 +88,8 @@ private:
     void startCopy();
     void cancelCopy();
     void startDesktopProgress(const RsyncOptions &options, const Location &dest);
+    void measureSourcesForDesktopProgress(const RsyncOptions &options);
+    void stopMeasuringSources();
     void appendLog(RsyncJob::LogLevel level, const QString &text);
     void onJobFinished();
 
@@ -153,6 +158,7 @@ private:
 
     QPointer<RsyncJob> m_job;
     DesktopProgress *m_desktopProgress = nullptr;
+    std::shared_ptr<std::atomic_bool> m_measureCancel; // stops measuring the sources
     // False while the options come from a preset or a --config file: they are not remembered.
     bool m_rememberOptions = true;
 };

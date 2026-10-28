@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QFutureWatcher>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -35,6 +36,7 @@
 #include <QStatusBar>
 #include <QStorageInfo>
 #include <QTabWidget>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -1191,12 +1193,45 @@ void MainWindow::startDesktopProgress(const RsyncOptions &options, const Locatio
         m_desktopProgress->setInfo(status.remove(percent));
     });
     connect(m_job, &RsyncJob::transferRateChanged, m_desktopProgress, &DesktopProgress::setSpeed);
+    measureSourcesForDesktopProgress(options);
     connect(m_job, &RsyncJob::phaseChanged, m_desktopProgress, [this](const QString &phase) {
         if (phase.isEmpty())
             return;
         m_desktopProgress->setTitle(phase);
         m_desktopProgress->setSpeed(0, -1); // verification and removal report no speed
     });
+}
+
+void MainWindow::measureSourcesForDesktopProgress(const RsyncOptions &options)
+{
+    // Plasma's speed graph needs the total size, which rsync does not report: the local sources are
+    // measured in the background. With a remote source there is no total (and no graph).
+    stopMeasuringSources();
+    QStringList paths;
+    for (const Location &loc : sources()) {
+        if (loc.isRemote())
+            return;
+        paths << loc.path;
+    }
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    m_measureCancel = cancel;
+    const bool recursive = options.archive || options.recursive;
+    auto *watcher = new QFutureWatcher<qint64>(this);
+    connect(watcher, &QFutureWatcher<qint64>::finished, this, [this, watcher, cancel] {
+        watcher->deleteLater();
+        if (!cancel->load())
+            m_desktopProgress->setTotalBytes(watcher->result());
+    });
+    watcher->setFuture(QtConcurrent::run([paths, recursive, cancel] {
+        return LocalPath::totalSize(paths, recursive, cancel.get());
+    }));
+}
+
+void MainWindow::stopMeasuringSources()
+{
+    if (m_measureCancel)
+        m_measureCancel->store(true);
+    m_measureCancel.reset();
 }
 
 void MainWindow::cancelCopy()
@@ -1230,6 +1265,7 @@ void MainWindow::appendLog(RsyncJob::LogLevel level, const QString &text)
 void MainWindow::onJobFinished()
 {
     const RsyncJob::Summary summary = m_job->summary();
+    stopMeasuringSources();
     if (summary.ok())
         m_desktopProgress->finish(false);
     else if (summary.cancelled)
@@ -1290,6 +1326,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         }
         delete m_job; // the destructor kills the rsync process
     }
+    stopMeasuringSources(); // quitting waits for running background tasks
     saveSettings();
     event->accept();
 }

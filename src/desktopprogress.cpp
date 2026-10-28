@@ -56,6 +56,7 @@ void DesktopProgress::start(const QString &title, const QString &source, const Q
     m_jobPath.clear();
     m_progress = 0.0;
     m_progressChanged = true;
+    m_elapsed.start();
     m_pending = {
         {QStringLiteral("title"), title},
         {QStringLiteral("descriptionLabel1"), tr("Source")},
@@ -142,6 +143,14 @@ void DesktopProgress::setSpeed(qint64 bytesPerSecond, qint64 processedBytes)
     scheduleUpdate();
 }
 
+void DesktopProgress::setTotalBytes(qint64 totalBytes)
+{
+    if (!m_active || totalBytes <= 0)
+        return;
+    m_pending.insert(QStringLiteral("totalBytes"), qulonglong(totalBytes));
+    scheduleUpdate();
+}
+
 void DesktopProgress::finish(bool cancelled, const QString &errorMessage)
 {
     if (!m_active)
@@ -182,6 +191,9 @@ void DesktopProgress::flush()
     }
     if (m_jobPath.isEmpty() || m_pending.isEmpty())
         return;
+    // Milliseconds since the start, like KJob::elapsedTime(). The keys of the map are sent in alphabetical
+    // order, so Plasma has it before "processedBytes" when it computes the average speed.
+    m_pending.insert(QStringLiteral("elapsedTime"), qlonglong(m_elapsed.elapsed()));
     QDBusMessage update = QDBusMessage::createMethodCall(m_jobService, m_jobPath, kJobInterface, QStringLiteral("update"));
     update << m_pending;
     QDBusConnection::sessionBus().asyncCall(update);

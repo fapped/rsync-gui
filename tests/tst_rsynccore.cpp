@@ -167,6 +167,7 @@ private slots:
     void localPathRoundTrip();
     void localPathRandomRoundTrip();
     void localPathUrlsAndQuoting();
+    void localTotalSize();
     void copyNonUtf8Names();
     void jsonRoundTrip();
     void jsonMissingKeysKeepBase();
@@ -1006,6 +1007,23 @@ void TestRsyncCore::localPathUrlsAndQuoting()
 
     // The command preview uses bash's $'...' for such names, so it can be pasted into a shell.
     QCOMPARE(shellQuote(LocalPath::decode("/tmp/a\xff'b\\c")), QStringLiteral("$'/tmp/a\\xff\\'b\\\\c'"));
+}
+
+void TestRsyncCore::localTotalSize()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("dir/a"), QByteArray(1000, 'a'));
+    writeFile(tmp.filePath("dir/sub/b"), QByteArray(234, 'b'));
+    writeFile(tmp.filePath("file"), QByteArray(5, 'f'));
+    writeFile(tmp.filePath("outside/big"), QByteArray(100000, 'x'));
+    QVERIFY(QFile::link(tmp.filePath("outside"), tmp.filePath("dir/link"))); // not followed
+
+    const QStringList paths{tmp.filePath("dir"), tmp.filePath("file"), tmp.filePath("missing")};
+    QCOMPARE(LocalPath::totalSize(paths, true), qint64(1239));
+    QCOMPARE(LocalPath::totalSize(paths, false), qint64(5)); // without -r rsync skips directories
+    const std::atomic_bool cancelled{true};
+    QCOMPARE(LocalPath::totalSize(paths, true, &cancelled), qint64(-1));
 }
 
 void TestRsyncCore::copyNonUtf8Names()
