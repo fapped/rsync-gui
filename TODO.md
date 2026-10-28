@@ -30,14 +30,16 @@
 - [x] Recently used settings files (*File → Recent settings*)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
+- [x] Remote tests against an ssh server in a container (`tools/ssh-test/run.sh`): both directions,
+      non-UTF-8 names, verified move, remote source move, cancelling, password and host key via `SSH_ASKPASS`
 - [x] `--modify-window=1` added automatically for destinations that keep times only to 2 s (FAT),
       detected by setting a time with an odd second on a temporary file (checked on FAT32/exFAT images)
 
 ## To do
 
-- [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
-- [ ] Later: ask for unknown ssh host keys in the GUI (ssh has no terminal; in Plasma `SSH_ASKPASS_REQUIRE=prefer`
-      may already show the question through ksshaskpass - to be checked)
+- [ ] Later: unknown ssh host keys - the tests show that ssh asks the question through `SSH_ASKPASS`
+      (Plasma sets ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`); check by hand that ksshaskpass shows it,
+      otherwise a dialog of our own (fingerprint from `ssh-keyscan`)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

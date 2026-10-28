@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -120,6 +121,63 @@ RsyncJob::Plan localPlan(const QStringList &sources, const QString &destination,
     return RsyncJob::plan(locations, Location::parse(destination), options);
 }
 
+
+// The remote tests run only against a test ssh server: tools/ssh-test/run.sh starts one in a container
+// and sets RSYNC_GUI_TEST_SSH (sftp://user@host:port/home) and RSYNC_GUI_TEST_SSH_SHELL (the ssh command).
+struct RemoteServer
+{
+    Location home;
+    QString shell;
+    QString dir; // a fresh directory for one test, removed by the destructor
+
+    explicit RemoteServer(const QString &testName)
+    {
+        home = Location::parse(qEnvironmentVariable("RSYNC_GUI_TEST_SSH"));
+        shell = qEnvironmentVariable("RSYNC_GUI_TEST_SSH_SHELL");
+        if (isValid()) {
+            dir = home.path + QStringLiteral("/") + testName + QLatin1Char('-')
+                + QString::number(QRandomGenerator::global()->generate(), 16);
+            run(QStringLiteral("mkdir -p '%1'").arg(dir));
+        }
+    }
+    ~RemoteServer()
+    {
+        if (isValid())
+            run(QStringLiteral("rm -rf '%1'").arg(dir));
+    }
+    bool isValid() const { return home.isRemote() && !shell.isEmpty(); }
+
+    // A location on the server (inside the test directory).
+    Location at(const QString &relative) const
+    {
+        Location location = home;
+        location.path = dir + QLatin1Char('/') + relative;
+        return location;
+    }
+    // Runs a shell command on the server and returns its standard output.
+    QByteArray run(const QString &command, int *exitCode = nullptr) const
+    {
+        QStringList args;
+        splitArguments(shell, &args);
+        const QString program = args.takeFirst();
+        args << QStringLiteral("-p") << QString::number(home.port)
+             << (home.user.isEmpty() ? home.host : home.user + QLatin1Char('@') + home.host) << command;
+        QProcess process;
+        process.start(program, args);
+        process.waitForFinished(30000);
+        if (exitCode)
+            *exitCode = process.exitCode();
+        return process.readAllStandardOutput();
+    }
+    RsyncOptions options() const
+    {
+        RsyncOptions o = testOptions();
+        o.useRemoteShell = true;
+        o.remoteShell = shell;
+        return o;
+    }
+};
+
 } // namespace
 
 class TestRsyncCore : public QObject
@@ -185,6 +243,11 @@ private slots:
     void summaryFlags();
     void modifyWindowArgument();
     void modifyWindowProbe();
+    void remoteRoundTrip();
+    void remoteVerifiedMove();
+    void remoteSourceMove();
+    void remoteCancel();
+    void remoteAskpassHostKeyAndPassword();
 };
 
 void TestRsyncCore::initTestCase()
@@ -1404,6 +1467,197 @@ void TestRsyncCore::modifyWindowProbe()
     QCOMPARE(RsyncJob::modifyWindowFor(fat), 1);
     QCOMPARE(RsyncJob::modifyWindowFor(fat, false), 1);
     QCOMPARE(RsyncJob::modifyWindowFor(fat + QStringLiteral("/missing/dir")), 1);
+}
+
+void TestRsyncCore::remoteRoundTrip()
+{
+    RemoteServer server(QStringLiteral("roundtrip"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    // Names with a space, with a byte that is not valid UTF-8 (Latin-1 "é"), a subdirectory and a symlink.
+    const QByteArray src = QFile::encodeName(tmp.filePath(QStringLiteral("src")));
+    QVERIFY(QDir().mkpath(tmp.filePath(QStringLiteral("src/sub dir"))));
+    const QList<QPair<QByteArray, QByteArray>> files{
+        {"plain.txt", "plain"},
+        {"with space.txt", "space"},
+        {"latin1-\xe9.txt", "latin1"},
+        {"sub dir/deep.bin", QByteArray(3000, 'x')}, // readRaw() reads up to 4 KiB
+    };
+    for (const auto &[name, data] : files)
+        writeRaw(src + '/' + name, data);
+    QCOMPARE(::symlink("plain.txt", (src + "/link").constData()), 0);
+    // QTemporaryDir cannot remove names that are not valid UTF-8.
+    const auto cleanup = qScopeGuard([&] {
+        removeTree(src);
+        removeTree(QFile::encodeName(tmp.filePath(QStringLiteral("back"))));
+    });
+
+    // Local -> remote, into a directory that does not exist yet (rsync creates the last one).
+    RsyncOptions options = server.options();
+    const RsyncJob::Plan up = RsyncJob::plan({Location::parse(LocalPath::decode(src))}, server.at(QStringLiteral("dest")),
+                                             options);
+    QVERIFY2(up.ok(), qPrintable(up.error));
+    QCOMPARE(up.transfers.first().port, server.home.port);
+    RsyncJob upload(up.transfers, options);
+    QVERIFY(runJob(upload));
+    QVERIFY(upload.summary().ok());
+    const QByteArray listing = server.run(QStringLiteral("cd '%1/dest/src' && find . | LC_ALL=C sort").arg(server.dir));
+    QCOMPARE(listing, QByteArray(".\n./latin1-\xe9.txt\n./link\n./plain.txt\n./sub dir\n./sub dir/deep.bin\n./with space.txt\n"));
+    QCOMPARE(server.run(QStringLiteral("readlink '%1/dest/src/link'").arg(server.dir)), QByteArray("plain.txt\n"));
+
+    // Remote -> local, back again: the same bytes under the same names.
+    const QString back = tmp.filePath(QStringLiteral("back"));
+    QVERIFY(QDir().mkpath(back));
+    const RsyncJob::Plan down = RsyncJob::plan({server.at(QStringLiteral("dest/src"))}, Location::parse(back), options);
+    QVERIFY2(down.ok(), qPrintable(down.error));
+    RsyncJob download(down.transfers, options);
+    QVERIFY(runJob(download));
+    QVERIFY(download.summary().ok());
+    for (const auto &[name, data] : files)
+        QCOMPARE(readRaw(QFile::encodeName(back) + "/src/" + name), data);
+    QVERIFY(QFileInfo(back + QStringLiteral("/src/link")).isSymLink());
+}
+
+void TestRsyncCore::remoteVerifiedMove()
+{
+    RemoteServer server(QStringLiteral("verifiedmove"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a"), "aaa");
+    writeFile(tmp.filePath("src/sub/b"), "bbb");
+
+    // Copy, verify on the server, and only then remove the local sources (and the emptied directories).
+    RsyncOptions options = server.options();
+    options.checksum = true;
+    options.verifyAfter = true;
+    options.removeSourceFiles = true;
+    options.removeSourceDirs = true;
+    QVERIFY(options.verifiedMove());
+    const RsyncJob::Plan plan = RsyncJob::plan({Location::parse(tmp.filePath("src"))}, server.at(QStringLiteral("dest")),
+                                               options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(job.summary().verified, 1);
+    QCOMPARE(job.summary().differences, 0);
+    QCOMPARE(job.summary().sourcesRemoved, 1);
+    QVERIFY(!QFileInfo::exists(tmp.filePath("src")));
+    QCOMPARE(server.run(QStringLiteral("cat '%1/dest/src/a' '%1/dest/src/sub/b'").arg(server.dir)), QByteArray("aaabbb"));
+}
+
+void TestRsyncCore::remoteSourceMove()
+{
+    RemoteServer server(QStringLiteral("sourcemove"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    server.run(QStringLiteral("mkdir -p '%1/src/sub' && printf one > '%1/src/one' && printf two > '%1/src/sub/two'")
+                   .arg(server.dir));
+
+    // Remote -> local move: rsync removes the files on the server (directories stay, they are not local).
+    RsyncOptions options = server.options();
+    options.removeSourceFiles = true;
+    const QString dest = tmp.filePath(QStringLiteral("dest"));
+    QVERIFY(QDir().mkpath(dest));
+    const RsyncJob::Plan plan = RsyncJob::plan({server.at(QStringLiteral("src"))}, Location::parse(dest), options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(readFile(dest + QStringLiteral("/src/one")), QByteArray("one"));
+    QCOMPARE(readFile(dest + QStringLiteral("/src/sub/two")), QByteArray("two"));
+    QCOMPARE(server.run(QStringLiteral("find '%1/src' -type f | wc -l").arg(server.dir)).trimmed(), QByteArray("0"));
+}
+
+void TestRsyncCore::remoteCancel()
+{
+    RemoteServer server(QStringLiteral("cancel"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QByteArray data(16 * 1024 * 1024, '\0');
+    for (qsizetype i = 0; i < data.size(); i += 4)
+        *reinterpret_cast<quint32 *>(data.data() + i) = QRandomGenerator::global()->generate();
+    writeFile(tmp.filePath("src/big.bin"), data);
+
+    RsyncOptions options = server.options();
+    options.useBwLimit = true;
+    options.bwLimit = QStringLiteral("1M"); // 16 s for the whole file
+    const RsyncJob::Plan plan = RsyncJob::plan({Location::parse(tmp.filePath("src"))}, server.at(QStringLiteral("dest")),
+                                               options);
+    RsyncJob job(plan.transfers, options);
+    QSignalSpy finished(&job, &RsyncJob::finished);
+    job.start();
+    QTest::qWait(1500);
+    QVERIFY(job.isRunning());
+    job.cancel();
+    QVERIFY(finished.count() > 0 || finished.wait(15000));
+    QVERIFY(job.summary().cancelled);
+    QVERIFY(!job.summary().ok());
+    // The rsync process on the server ends too (the connection is gone).
+    QByteArray processes;
+    for (int i = 0; i < 30; ++i) {
+        processes = server.run(QStringLiteral("pgrep -x rsync || true")).trimmed();
+        if (processes.isEmpty())
+            break;
+        QTest::qWait(100);
+    }
+    QCOMPARE(processes, QByteArray());
+}
+
+void TestRsyncCore::remoteAskpassHostKeyAndPassword()
+{
+    RemoteServer server(QStringLiteral("askpass"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    const QString password = qEnvironmentVariable("RSYNC_GUI_TEST_SSH_PASSWORD");
+    if (password.isEmpty())
+        QSKIP("RSYNC_GUI_TEST_SSH_PASSWORD is not set");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a"), "aaa");
+
+    // rsync runs ssh without a terminal: questions go to the SSH_ASKPASS program (in Plasma ksshaskpass,
+    // with SSH_ASKPASS_REQUIRE=prefer). This one answers the host key question and the password prompt
+    // and records them. A fresh known_hosts file, so the host is unknown.
+    const QString askpass = tmp.filePath(QStringLiteral("askpass.sh"));
+    const QString prompts = tmp.filePath(QStringLiteral("prompts.log"));
+    writeFile(askpass, QStringLiteral("#!/bin/sh\nprintf '%s\\n---\\n' \"$1\" >> '%1'\ncase \"$1\" in\n"
+                                      "  *'continue connecting'*) echo yes ;;\n  *assword*) echo '%2' ;;\nesac\n")
+                           .arg(prompts, password)
+                           .toUtf8());
+    QVERIFY(QFile::setPermissions(askpass, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const QByteArray oldAskpass = qgetenv("SSH_ASKPASS");
+    const QByteArray oldRequire = qgetenv("SSH_ASKPASS_REQUIRE");
+    qputenv("SSH_ASKPASS", QFile::encodeName(askpass));
+    qputenv("SSH_ASKPASS_REQUIRE", "force");
+    const auto restore = qScopeGuard([&] {
+        qputenv("SSH_ASKPASS", oldAskpass);
+        qputenv("SSH_ASKPASS_REQUIRE", oldRequire);
+    });
+
+    RsyncOptions options = testOptions();
+    options.useRemoteShell = true;
+    options.remoteShell = QStringLiteral("ssh -F /dev/null -o PubkeyAuthentication=no -o PreferredAuthentications=password "
+                                         "-o UserKnownHostsFile=%1")
+                              .arg(tmp.filePath(QStringLiteral("known_hosts")));
+    const RsyncJob::Plan plan = RsyncJob::plan({Location::parse(tmp.filePath("src"))}, server.at(QStringLiteral("dest")),
+                                               options);
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(server.run(QStringLiteral("cat '%1/dest/src/a'").arg(server.dir)), QByteArray("aaa"));
+    const QByteArray asked = readFile(prompts);
+    QVERIFY2(asked.contains("continue connecting"), asked.constData());
+    QVERIFY2(asked.contains("password"), asked.constData());
+    QVERIFY(QFileInfo(tmp.filePath(QStringLiteral("known_hosts"))).size() > 0);
 }
 
 QTEST_GUILESS_MAIN(TestRsyncCore)

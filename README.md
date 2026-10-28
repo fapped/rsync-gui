@@ -82,6 +82,16 @@ Tests:
 ctest --test-dir build --output-on-failure
 ```
 
+The remote tests (copy to and from an ssh host with names that are not valid UTF-8, verified moves
+in both directions, cancelling, a password and an unknown host key answered through `SSH_ASKPASS`)
+are skipped unless there is a test server. With Docker, this runs all tests against a throwaway
+container with sshd and rsync (Alpine), on `127.0.0.1:2222`, with a key and a `known_hosts` file of
+its own - `~/.ssh` is not used:
+
+```bash
+tools/ssh-test/run.sh build
+```
+
 System-wide installation (executable, `.desktop` entry, presets, Dolphin menu):
 
 ```bash
