@@ -143,6 +143,7 @@ private:
     QCheckBox *m_removeSourceDirsCheck = nullptr;
     QCheckBox *m_dryRunCheck = nullptr;
     QCheckBox *m_verifyCheck = nullptr;
+    QCheckBox *m_autoModifyWindowCheck = nullptr;
     QLineEdit *m_extraEdit = nullptr;
     QAction *m_importAction = nullptr;
     QAction *m_exportAction = nullptr;

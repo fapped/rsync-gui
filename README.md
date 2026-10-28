@@ -162,7 +162,9 @@ Checked with loop-mounted images: on FAT32 the second run without the option cop
 again, with it none; exFAT (10 ms), NTFS and Linux file systems do not need it and do not get it.
 Not handled: remote destinations (not checked) and the shift by one hour after a change to or from
 summer time (FAT keeps local time) - such a run copies everything once more. An explicit
-`--modify-window` in the additional arguments takes precedence.
+`--modify-window` in the additional arguments takes precedence, and the option *FAT destinations:
+compare file times with a tolerance of 1 s* (on by default, remembered, not changed by presets)
+turns the detection off completely.
 
 ## Dolphin context menu
 
@@ -318,12 +320,14 @@ the list, presets are not listed there (they have *Load preset*).
         "verifyAfter": false,
         "useBwLimit": false,
         "useRemoteShell": false,
+        "autoModifyWindow": true,
         "progress": "per-file",
         "existing": "replace"
     }
 }
 ```
 
+- `autoModifyWindow`: add `--modify-window=1` for FAT destinations (see above); `false` never adds it,
 - `progress`: `none`, `per-file` (`--progress`, `-P` with `partial`), `overall` (`--info=progress2`),
 - `existing`: `replace`, `skip-newer` (`-u`), `ignore-existing` (`--ignore-existing`),
 - `recursive`, `links`, `perms`, `times`, `group`, `owner`, `devices` (`-rlptgoD`) are used only

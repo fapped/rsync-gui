@@ -285,6 +285,15 @@ void MainWindow::buildUi()
     removeDirsRow->addWidget(m_removeSourceDirsCheck, 1);
     form->addRow(QString(), removeDirsRow);
     form->addRow(QString(), m_dryRunCheck);
+    m_autoModifyWindowCheck = new QCheckBox(tr("FAT destinations: compare file times with a tolerance of 1 s "
+                                               "(--modify-window=1, detected automatically)"),
+                                            m_optionsBox);
+    m_autoModifyWindowCheck->setToolTip(tr("FAT keeps file times only to 2 seconds - without the tolerance rsync copies "
+                                           "every file with an odd second again on every run. Before copying, a "
+                                           "temporary file in the destination shows whether its times are rounded.\n"
+                                           "Turned off, --modify-window is never added automatically."));
+    form->addRow(QString(), m_autoModifyWindowCheck);
+    connect(m_autoModifyWindowCheck, &QCheckBox::toggled, this, [this] { updateDestinationInfo(); });
 
     m_verifyCheck = new QCheckBox(tr("Verify after copying (compare checksums of the source and the destination)"),
                                   m_optionsBox);
@@ -422,7 +431,7 @@ void MainWindow::buildUi()
     for (QCheckBox *box : {m_archiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
                            m_checksumCheck, m_partialCheck, m_verboseCheck, m_humanCheck, m_compressCheck,
                            m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck, m_removeSourceDirsCheck,
-                           m_dryRunCheck, m_verifyCheck}) {
+                           m_dryRunCheck, m_verifyCheck, m_autoModifyWindowCheck}) {
         connect(box, &QCheckBox::toggled, this, refresh);
     }
     for (QComboBox *combo : {m_existingCombo, m_progressCombo})
@@ -605,6 +614,7 @@ RsyncOptions MainWindow::currentOptions() const
     o.removeSourceDirs = m_removeSourceDirsCheck->isChecked();
     o.dryRun = m_dryRunCheck->isChecked();
     o.verifyAfter = m_verifyCheck->isChecked();
+    o.autoModifyWindow = m_autoModifyWindowCheck->isChecked();
     o.extraArguments = m_extraEdit->text().trimmed();
     return o;
 }
@@ -641,6 +651,7 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     m_removeSourceDirsCheck->setChecked(o.removeSourceDirs);
     m_dryRunCheck->setChecked(o.dryRun);
     m_verifyCheck->setChecked(o.verifyAfter);
+    m_autoModifyWindowCheck->setChecked(o.autoModifyWindow);
     m_extraEdit->setText(o.extraArguments);
     updatePreview();
     updateControls();
@@ -802,7 +813,7 @@ void MainWindow::updateDestinationInfo()
             text = storage.isValid() && LocalPath::isPlain(dest.path)
                 ? tr("Existing directory, %1 free.").arg(QLocale().formattedDataSize(storage.bytesAvailable()))
                 : tr("Existing directory.");
-            if (RsyncJob::isFatFileSystem(dest.path))
+            if (RsyncJob::isFatFileSystem(dest.path) && m_autoModifyWindowCheck->isChecked())
                 text += tr(" FAT file system: file times are compared with a tolerance of 1 s (--modify-window=1).");
         } else if (LocalPath::info(dest.path).exists) {
             text = tr("<b>Not a directory:</b> %1").arg(LocalPath::display(dest.path).toHtmlEscaped());
@@ -1112,7 +1123,7 @@ void MainWindow::startCopy()
     }
 
     // FAT keeps file times to 2 s: without a tolerance rsync would copy half of the files again on every run.
-    if (!dest.isRemote() && (options.archive || options.times))
+    if (options.autoModifyWindow && !dest.isRemote() && (options.archive || options.times))
         options.modifyWindow = RsyncJob::modifyWindowFor(dest.path, !options.dryRun);
 
     // Copying is not destructive - only the options that delete files are confirmed.

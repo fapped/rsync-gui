@@ -57,6 +57,8 @@ struct RsyncOptions
     bool useRemoteShell = false; // -e
     QString remoteShell;
     QString extraArguments;    // split like a shell command line
+    // Whether the window sets modifyWindow for FAT destinations (off: never added automatically).
+    bool autoModifyWindow = true;
     // Not an option of the window and not saved: set for a run when the destination keeps file times
     // less precisely than rsync compares them (FAT: 2 s), see RsyncJob::modifyWindowFor().
     int modifyWindow = 0;      // --modify-window (with -t, unless given in extraArguments)

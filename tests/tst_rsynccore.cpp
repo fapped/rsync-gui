@@ -1166,6 +1166,7 @@ void TestRsyncCore::jsonRoundTrip()
     o.useRemoteShell = true;
     o.remoteShell = "ssh -i key";
     o.extraArguments = "--exclude='*.tmp'";
+    o.autoModifyWindow = false;
 
     QString error;
     const RsyncOptions copy = RsyncOptions::fromJson(o.toJson(), &error);
@@ -1441,6 +1442,9 @@ void TestRsyncCore::modifyWindowArgument()
     QCOMPARE(options.arguments().filter(QStringLiteral("--modify-window")), QStringList{QStringLiteral("--modify-window=3601")});
     options.extraArguments = QStringLiteral("-@ 2");
     QVERIFY(options.arguments().filter(QStringLiteral("--modify-window")).isEmpty());
+    // On by default; turned off it is kept (the window then never sets modifyWindow).
+    QVERIFY(RsyncOptions().autoModifyWindow);
+    QCOMPARE(RsyncOptions().toJson().value("autoModifyWindow").toBool(true), true);
     // Not a saved option.
     RsyncOptions plain;
     plain.modifyWindow = 1;
