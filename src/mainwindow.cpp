@@ -27,6 +27,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSettings>
 #include <QStandardPaths>
@@ -60,6 +61,8 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(tr("Rsync GUI"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("folder-sync")));
     setAcceptDrops(true);
+    m_desktopProgress = new DesktopProgress(this);
+    connect(m_desktopProgress, &DesktopProgress::cancelRequested, this, &MainWindow::cancelCopy);
     buildUi();
     buildMenus();
     loadSettings();
@@ -1056,6 +1059,7 @@ void MainWindow::startCopy()
     saveSettings();
     delete m_job;
     m_job = new RsyncJob(std::move(plan.transfers), options, this);
+    startDesktopProgress(options, dest);
     connect(m_job, &RsyncJob::log, this, &MainWindow::appendLog);
     connect(m_job, &RsyncJob::progress, m_progress, &QProgressBar::setValue);
     connect(m_job, &RsyncJob::currentFileChanged, this, [this](const QString &file) {
@@ -1081,6 +1085,27 @@ void MainWindow::startCopy()
     m_tabs->setCurrentIndex(m_tabs->indexOf(m_log->parentWidget()));
     m_job->start();
     updateControls();
+}
+
+void MainWindow::startDesktopProgress(const RsyncOptions &options, const Location &dest)
+{
+    const QList<Location> list = sources();
+    QString source = list.isEmpty() ? QString() : list.first().toString();
+    if (list.size() > 1)
+        source = tr("%1 (+%2 more)").arg(source).arg(list.size() - 1);
+    const QString destUrl = dest.isRemote() ? QString() : QUrl::fromLocalFile(dest.path).toString();
+    const QString title = options.dryRun ? tr("Dry run") : options.removeSourceFiles ? tr("Moving") : tr("Copying");
+    m_desktopProgress->start(title, source, dest.toString(), destUrl);
+    connect(m_job, &RsyncJob::progress, m_desktopProgress, &DesktopProgress::setProgress);
+    connect(m_job, &RsyncJob::statusChanged, m_desktopProgress, [this](QString status) {
+        // Plasma shows the percentage itself; keep the size, speed and ETA.
+        static const QRegularExpression percent(QStringLiteral("^\\d+%\\s*"));
+        m_desktopProgress->setInfo(status.remove(percent));
+    });
+    connect(m_job, &RsyncJob::phaseChanged, m_desktopProgress, [this](const QString &phase) {
+        if (!phase.isEmpty())
+            m_desktopProgress->setTitle(phase);
+    });
 }
 
 void MainWindow::cancelCopy()
@@ -1114,6 +1139,14 @@ void MainWindow::appendLog(RsyncJob::LogLevel level, const QString &text)
 void MainWindow::onJobFinished()
 {
     const RsyncJob::Summary summary = m_job->summary();
+    if (summary.ok())
+        m_desktopProgress->finish(false);
+    else if (summary.cancelled)
+        m_desktopProgress->finish(true);
+    else if (summary.differences > 0)
+        m_desktopProgress->finish(false, tr("Verification found %1 difference(s).").arg(summary.differences));
+    else
+        m_desktopProgress->finish(false, tr("Finished with errors."));
     m_progress->setRange(0, 1000);
     m_transferStatus->clear();
     // After a move, sources that no longer exist were transferred and removed - drop them from the list.

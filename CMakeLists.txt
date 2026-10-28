@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets DBus)
 qt_standard_project_setup()
 
 include(CTest)
@@ -25,8 +25,9 @@ target_compile_definitions(rsynccore PUBLIC RSYNC_GUI_VERSION="${PROJECT_VERSION
 qt_add_executable(rsync-gui
     src/main.cpp
     src/mainwindow.h src/mainwindow.cpp
+    src/desktopprogress.h src/desktopprogress.cpp
 )
-target_link_libraries(rsync-gui PRIVATE rsynccore Qt6::Widgets)
+target_link_libraries(rsync-gui PRIVATE rsynccore Qt6::Widgets Qt6::DBus)
 
 option(RSYNC_GUI_INSTALL_SERVICEMENUS "Install the Dolphin (KDE) context menu entries" ON)
 

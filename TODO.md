@@ -18,25 +18,19 @@
       with the absolute program path
 - [x] Installed to `~/.local`; the older service menu removed
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
+- [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 
 ## To do
 
+- [ ] Check the cancel button of the Plasma job notification by hand
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] "Move to…" Dolphin action (`--remove-source-files` + removing emptied source directories)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
 - [ ] `--modify-window=1` as a checkbox (or automatically for FAT destinations, detected with `QStorageInfo`)
-- [ ] Progress outside the window (asked 2026-10-25, for later):
-      - taskbar (Plasma task manager): the `com.canonical.Unity.LauncherEntry` D-Bus signal `Update`
-        with `application://rsync-gui.desktop` and `{progress: 0..1, progress-visible: bool}` —
-        only Qt6::DBus needed, the desktop file name must match (`setDesktopFileName` is already set)
-      - notification area (Plasma "jobs", like a Dolphin copy, with speed and a cancel button):
-        `KUiServerV2JobTracker` from KF6 JobWidgets + a `KJob` wrapping `RsyncJob`, or `org.kde.JobViewServerV2`
-        over D-Bus directly to avoid the KF6 dependency
-      - both optional at runtime (no-op outside KDE / without the D-Bus services)
 - [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)

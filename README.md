@@ -19,6 +19,8 @@ be passed as additional arguments.
 - preview of the generated command, progress bar (per file or overall), speed and ETA, log,
   cancellation, confirmation only for options that delete files, optional **closing the window
   when the transfer finishes** successfully,
+- **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
+  notification area (with speed, ETA, a cancel button and "Open destination" afterwards),
 - options are remembered between runs, export/import to/from JSON files, **presets** and
   integration with the **Dolphin** context menu (*Rsync* submenu).
 
@@ -126,6 +128,19 @@ must be reachable without typing in a terminal: ssh keys / an agent, or a passwo
 
 If you used your own rsync service menu before, remove it to avoid duplicated entries.
 New entries usually appear immediately; if not, run `kbuildsycoca6`.
+
+## Progress outside the window
+
+While a transfer runs, its progress is also shown
+
+- on the Rsync GUI entry in the task manager (the `com.canonical.Unity.LauncherEntry` D-Bus signal,
+  supported by Plasma; the entry is matched by `rsync-gui.desktop`, so it works for the installed
+  application),
+- as a job in the Plasma notification area (`org.kde.JobViewServerV2`): title (Copying / Verifying /
+  Moving), source, destination, percentage, size, speed and ETA, a button that cancels the transfer,
+  and after it the result with a link to the destination.
+
+On other desktops or without a session bus this does nothing.
 
 ## Close when finished
 
