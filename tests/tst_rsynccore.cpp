@@ -18,9 +18,12 @@
 #include <QTest>
 
 #include <cstring>
+#include <vector>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 #include <utime.h>
 
@@ -121,6 +124,28 @@ RsyncJob::Plan localPlan(const QStringList &sources, const QString &destination,
     return RsyncJob::plan(locations, Location::parse(destination), options);
 }
 
+
+
+// The bytes of a file that are in the page cache (mincore).
+qint64 residentBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() == 0)
+        return -1;
+    void *map = ::mmap(nullptr, size_t(file.size()), PROT_READ, MAP_SHARED, file.handle(), 0);
+    if (map == MAP_FAILED)
+        return -1;
+    const long page = ::sysconf(_SC_PAGESIZE);
+    std::vector<unsigned char> pages(size_t((file.size() + page - 1) / page));
+    qint64 resident = -1;
+    if (::mincore(map, size_t(file.size()), pages.data()) == 0) {
+        resident = 0;
+        for (unsigned char p : pages)
+            resident += (p & 1) ? page : 0;
+    }
+    ::munmap(map, size_t(file.size()));
+    return resident;
+}
 
 // The remote tests run only against a test ssh server: tools/ssh-test/run.sh starts one in a container
 // and sets RSYNC_GUI_TEST_SSH (sftp://user@host:port/home) and RSYNC_GUI_TEST_SSH_SHELL (the ssh command).
@@ -243,6 +268,9 @@ private slots:
     void summaryFlags();
     void modifyWindowArgument();
     void modifyWindowProbe();
+    void destinationPaths();
+    void dropFromPageCache();
+    void verifyReadsFromDisk();
     void remoteRoundTrip();
     void remoteVerifiedMove();
     void remoteSourceMove();
@@ -966,7 +994,7 @@ void TestRsyncCore::verifiedMove()
         if (!args.first().toString().isEmpty())
             order << args.first().toString();
     }
-    QCOMPARE(order, (QStringList{"Copying", "Verifying", "Removing the sources"}));
+    QCOMPARE(order, (QStringList{"Copying", "Writing to the disk", "Verifying", "Removing the sources"}));
 }
 
 void TestRsyncCore::moveRemovesEmptiedDirectories()
@@ -1471,6 +1499,95 @@ void TestRsyncCore::modifyWindowProbe()
     QCOMPARE(RsyncJob::modifyWindowFor(fat), 1);
     QCOMPARE(RsyncJob::modifyWindowFor(fat, false), 1);
     QCOMPARE(RsyncJob::modifyWindowFor(fat + QStringLiteral("/missing/dir")), 1);
+}
+
+void TestRsyncCore::destinationPaths()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a"), "a");
+    writeFile(tmp.filePath("src/sub/b"), "b");
+    writeFile(tmp.filePath("dest/src/a"), "a");
+    writeFile(tmp.filePath("dest/a"), "a");
+    writeFile(tmp.filePath("dest/sub/b"), "b");
+    const QString dest = tmp.filePath("dest");
+
+    RsyncJob::Transfer transfer;
+    transfer.destination = dest + QLatin1Char('/');
+    transfer.sources = {tmp.filePath("src")};
+    QCOMPARE(RsyncJob::destinationPaths(transfer), QStringList{dest + "/src"});
+    // The contents of a directory: its entries.
+    transfer.sources = {tmp.filePath("src") + QLatin1Char('/')};
+    QStringList paths = RsyncJob::destinationPaths(transfer);
+    paths.sort();
+    QCOMPARE(paths, QStringList({dest + "/a", dest + "/sub"}));
+    // A copy that is not where expected (e.g. --relative), and remote contents: the whole destination.
+    transfer.sources = {tmp.filePath("other")};
+    QCOMPARE(RsyncJob::destinationPaths(transfer), QStringList{dest});
+    transfer.sources = {QStringLiteral("user@host:/data/")};
+    QCOMPARE(RsyncJob::destinationPaths(transfer), QStringList{dest});
+    transfer.sources = {QStringLiteral("user@host:/data/src")};
+    QCOMPARE(RsyncJob::destinationPaths(transfer), QStringList{dest + "/src"});
+}
+
+void TestRsyncCore::dropFromPageCache()
+{
+    // On a disk file system (not tmpfs, where the page cache is the storage): the build directory.
+    QTemporaryDir tmp(QCoreApplication::applicationDirPath() + QStringLiteral("/tst-cache-XXXXXX"));
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("dir/big.bin"), QByteArray(4 * 1024 * 1024, 'x'));
+    writeFile(tmp.filePath("dir/sub/small"), "small");
+    QTemporaryDir outside;
+    QVERIFY(outside.isValid());
+    writeFile(outside.filePath("elsewhere"), "not mine");
+    QVERIFY(QFile::link(outside.filePath("elsewhere"), tmp.filePath("dir/link")));
+
+    std::atomic<bool> cancel{true};
+    QVERIFY(RsyncJob::dropFromPageCache({tmp.filePath("dir")}, &cancel).cancelled);
+    cancel = false;
+    const RsyncJob::CacheDropResult result = RsyncJob::dropFromPageCache({tmp.filePath("dir")}, &cancel);
+    QVERIFY(!result.cancelled);
+    QCOMPARE(result.files, 2); // the symlink is not followed
+    QCOMPARE(result.bytes, 4 * 1024 * 1024 + 5);
+    QCOMPARE(result.errors, 0);
+    QCOMPARE(readFile(tmp.filePath("dir/big.bin")).size(), 4 * 1024 * 1024); // nothing lost
+
+    struct statfs fs;
+    QVERIFY(::statfs(QFile::encodeName(tmp.path()).constData(), &fs) == 0);
+    constexpr long kTmpfsMagic = 0x01021994;
+    if (long(fs.f_type) == kTmpfsMagic)
+        QSKIP("The build directory is on tmpfs - the page cache cannot be dropped there.");
+    QVERIFY(residentBytes(tmp.filePath("dir/big.bin")) > 0); // read just now
+    RsyncJob::dropFromPageCache({tmp.filePath("dir")});
+    QCOMPARE(residentBytes(tmp.filePath("dir/big.bin")), 0);
+}
+
+void TestRsyncCore::verifyReadsFromDisk()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp(QCoreApplication::applicationDirPath() + QStringLiteral("/tst-verify-XXXXXX"));
+    QVERIFY(tmp.isValid());
+    QTemporaryDir source;
+    QVERIFY(source.isValid());
+    writeFile(source.filePath("src/a"), QByteArray(1024 * 1024, 'a'));
+    writeFile(source.filePath("src/sub/b"), "bbb");
+
+    RsyncOptions options = testOptions();
+    options.verifyAfter = true;
+    RsyncJob job(localPlan({source.filePath("src")}, tmp.path(), options).transfers, options);
+    QStringList log;
+    connect(&job, &RsyncJob::log, this, [&log](RsyncJob::LogLevel, const QString &text) { log << text; });
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(job.summary().verified, 1);
+    const QStringList dropped = log.filter(QStringLiteral("dropped from the cache"));
+    QCOMPARE(dropped.size(), 1);
+    QVERIFY2(dropped.first().startsWith(QStringLiteral("2 file(s)")), qPrintable(dropped.first()));
+    // The drop comes between the copy and the verification.
+    const qsizetype dropIndex = log.indexOf(dropped.first());
+    QVERIFY(dropIndex > log.indexOf(QStringLiteral("Transfer finished.")));
+    QVERIFY(dropIndex < log.indexOf(QStringLiteral("--- Verifying ---")));
 }
 
 void TestRsyncCore::remoteRoundTrip()

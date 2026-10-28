@@ -5,8 +5,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QLocale>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
@@ -338,6 +340,11 @@ RsyncJob::RsyncJob(QList<Transfer> transfers, RsyncOptions options, QObject *par
 
 RsyncJob::~RsyncJob()
 {
+    if (m_dropThread) {
+        m_dropCancel->store(true);
+        m_dropThread->disconnect(this);
+        m_dropThread->wait();
+    }
     if (m_process) {
         m_process->disconnect(this);
         m_process->kill();
@@ -366,6 +373,8 @@ void RsyncJob::cancel()
         return;
     m_cancelRequested = true;
     emit log(LogLevel::Warning, tr("Cancelling..."));
+    if (m_dropCancel)
+        m_dropCancel->store(true);
     if (m_process && m_process->state() != QProcess::NotRunning) {
         m_process->terminate();
         QPointer<QProcess> process = m_process;
@@ -591,7 +600,7 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         }
         if (runVerify) {
             m_phase = Phase::Verify;
-            startProcess();
+            startVerify();
             return;
         }
     } else if (m_phase == Phase::Verify) {
@@ -639,6 +648,162 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     m_phase = Phase::Copy;
     ++m_index;
     startNext();
+}
+
+void RsyncJob::startVerify()
+{
+    const Transfer &transfer = m_transfers.at(m_index);
+    if (Location::parse(transfer.destination).isRemote()) {
+        emit log(LogLevel::Info, tr("The destination is remote: the verification may read the copies from the "
+                                    "server's memory (its page cache) instead of its disk."));
+        startProcess();
+        return;
+    }
+    // Right after copying, the copies are still in memory: without this the verification would compare the
+    // source with the page cache, not with what is on the disk.
+    const QString phase = tr("Writing to the disk");
+    emit phaseChanged(phase);
+    emit log(LogLevel::Info, QStringLiteral("--- %1 ---").arg(phase));
+    emit statusChanged(QString());
+    m_dropCancel = std::make_shared<std::atomic<bool>>(m_cancelRequested);
+    auto result = std::make_shared<CacheDropResult>();
+    QThread *thread = QThread::create([paths = destinationPaths(transfer), cancel = m_dropCancel, result] {
+        *result = dropFromPageCache(paths, cancel.get());
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    connect(thread, &QThread::finished, this, [this, result] { onCacheDropped(*result); });
+    m_dropThread = thread;
+    thread->start();
+}
+
+void RsyncJob::onCacheDropped(const CacheDropResult &result)
+{
+    m_dropThread = nullptr;
+    m_dropCancel.reset();
+    if (m_cancelRequested || result.cancelled) {
+        ++m_summary.verifyFailed;
+        emit log(LogLevel::Warning, tr("Verification cancelled."));
+        if (m_options.verifiedMove())
+            emit log(LogLevel::Warning, tr("The sources were not removed, because the verification did not pass."));
+        m_phase = Phase::Copy;
+        ++m_index;
+        startNext();
+        return;
+    }
+    emit log(LogLevel::Info, tr("%n file(s) (%1) written to the disk and dropped from the cache - the verification "
+                                "reads them from the disk.", nullptr, int(result.files))
+                                 .arg(QLocale().formattedDataSize(result.bytes)));
+    if (result.errors > 0)
+        emit log(LogLevel::Warning, tr("%n file(s) could not be opened - they may be read from the cache.", nullptr,
+                                       result.errors));
+    startProcess();
+}
+
+QStringList RsyncJob::destinationPaths(const Transfer &transfer)
+{
+    QString dest = transfer.destination;
+    while (dest.size() > 1 && dest.endsWith(QLatin1Char('/')))
+        dest.chop(1);
+    QStringList paths;
+    for (const QString &source : transfer.sources) {
+        const Location location = Location::parse(source);
+        if (source.endsWith(QLatin1Char('/'))) {
+            if (location.isRemote())
+                return {dest};
+            // The contents of a local directory: its entries are in the destination.
+            const QByteArray dir = LocalPath::encode(location.path);
+            DIR *d = ::opendir(dir.constData());
+            if (!d)
+                return {dest};
+            while (dirent *entry = ::readdir(d)) {
+                if (std::strcmp(entry->d_name, ".") != 0 && std::strcmp(entry->d_name, "..") != 0)
+                    paths << dest + QLatin1Char('/') + LocalPath::decode(QByteArray(entry->d_name));
+            }
+            ::closedir(d);
+        } else {
+            QString name = location.path;
+            name = name.mid(name.lastIndexOf(QLatin1Char('/')) + 1);
+            if (name.isEmpty())
+                return {dest};
+            paths << dest + QLatin1Char('/') + name;
+        }
+    }
+    // Options like --relative put the copies elsewhere - then everything in the destination.
+    for (const QString &path : std::as_const(paths)) {
+        if (!LocalPath::info(path).exists)
+            return {dest};
+    }
+    return paths.isEmpty() ? QStringList{dest} : paths;
+}
+
+namespace {
+
+void dropTree(const QByteArray &path, dev_t device, RsyncJob::CacheDropResult &result, const std::atomic<bool> *cancel)
+{
+    if (cancel && cancel->load()) {
+        result.cancelled = true;
+        return;
+    }
+    struct stat st;
+    if (::lstat(path.constData(), &st) != 0 || st.st_dev != device)
+        return;
+    if (S_ISREG(st.st_mode)) {
+        int fd = ::open(path.constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NOATIME);
+        if (fd < 0 && errno == EPERM) // O_NOATIME needs the owner of the file
+            fd = ::open(path.constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd < 0) {
+            ++result.errors;
+            return;
+        }
+        ::fdatasync(fd); // normally nothing left after syncfs(); dirty pages would not be dropped
+        ::posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+        ::close(fd);
+        ++result.files;
+        result.bytes += st.st_size;
+    } else if (S_ISDIR(st.st_mode)) {
+        DIR *d = ::opendir(path.constData());
+        if (!d)
+            return;
+        QList<QByteArray> children;
+        while (dirent *entry = ::readdir(d)) {
+            if (std::strcmp(entry->d_name, ".") != 0 && std::strcmp(entry->d_name, "..") != 0)
+                children << path + '/' + entry->d_name;
+        }
+        ::closedir(d);
+        for (const QByteArray &child : std::as_const(children)) {
+            dropTree(child, device, result, cancel);
+            if (result.cancelled)
+                return;
+        }
+    }
+}
+
+} // namespace
+
+RsyncJob::CacheDropResult RsyncJob::dropFromPageCache(const QStringList &paths, const std::atomic<bool> *cancel)
+{
+    CacheDropResult result;
+    QList<dev_t> synced;
+    for (const QString &path : paths) {
+        const QByteArray encoded = LocalPath::encode(path);
+        struct stat st;
+        if (::lstat(encoded.constData(), &st) != 0)
+            continue;
+        if (!synced.contains(st.st_dev)) {
+            // All dirty data of the file system at once: faster than file by file, and on a slow USB stick
+            // this is where the waiting is - the data has to get there before unmounting anyway.
+            const int fd = ::open(encoded.constData(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+            if (fd >= 0) {
+                ::syncfs(fd);
+                ::close(fd);
+            }
+            synced << st.st_dev;
+        }
+        dropTree(encoded, st.st_dev, result, cancel);
+        if (result.cancelled)
+            break;
+    }
+    return result;
 }
 
 void RsyncJob::onProcessError(QProcess::ProcessError error)

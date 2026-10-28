@@ -9,9 +9,14 @@
 #include <QProcess>
 #include <QStringList>
 
+#include <atomic>
+#include <memory>
+
 // Copies sources to a destination with rsync, optionally followed by a verification pass.
 // rsync can read from only one remote host per run, so the sources are grouped into transfers
 // (all local sources, and one transfer per remote origin) run one after another.
+class QThread;
+
 class RsyncJob : public QObject
 {
     Q_OBJECT
@@ -94,6 +99,21 @@ public:
     // with an odd second, and the time read back is compared. Without `mayWrite` (a dry run) or when the
     // file cannot be created, the file system type decides (FAT).
     static int modifyWindowFor(const QString &localDestination, bool mayWrite = true);
+    struct CacheDropResult
+    {
+        qint64 files = 0;
+        qint64 bytes = 0;
+        int errors = 0; // files that could not be opened
+        bool cancelled = false;
+    };
+    // Writes the cached data of the file systems of `paths` to the disk (syncfs) and drops the regular files
+    // under `paths` (recursively, without following symlinks or entering other file systems) from the page
+    // cache, so that reading them again reads the disk. Only clean pages are dropped - no data is lost.
+    static CacheDropResult dropFromPageCache(const QStringList &paths, const std::atomic<bool> *cancel = nullptr);
+    // The paths in the local destination of a transfer that the verification reads: the copies of the
+    // sources ("dir" -> dest/dir, "dir/" -> the entries of dir in dest). The destination itself if that
+    // cannot be told (remote "dir/" sources, a copy that is not where expected).
+    static QStringList destinationPaths(const Transfer &transfer);
     // Whether the file system of an existing path is FAT (vfat / msdos) - by the type only, nothing is written.
     static bool isFatFileSystem(const QString &path);
     // Removes the empty directories in `dir` (deepest first) and `dir` itself unless `keepTop`.
@@ -129,6 +149,9 @@ private:
 
     void startNext();
     void startProcess();
+    // Before the verification of a local destination: drops the copies from the page cache (in a thread).
+    void startVerify();
+    void onCacheDropped(const CacheDropResult &result);
     void setRawArguments(QProcess *process, const QStringList &args) const;
     void onReadyRead();
     void handleLine(const QString &line);
@@ -157,4 +180,6 @@ private:
     int m_lastTotal = 0;
     bool m_running = false;
     bool m_cancelRequested = false;
+    std::shared_ptr<std::atomic<bool>> m_dropCancel; // set while the page cache is being dropped
+    QPointer<QThread> m_dropThread;
 };

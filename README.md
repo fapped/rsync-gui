@@ -263,6 +263,18 @@ Every file is read on both sides and its checksum compared; every entry that wou
 additional arguments (e.g. `--exclude`) are passed too, so excluded files are not reported. The
 verification is skipped for a dry run.
 
+**Reading the disk, not the memory.** Right after copying, the copies are still in the page cache
+(RAM), so a plain second pass would compare the source with the memory, not with what is on the
+drive - a faulty USB stick or a drive with a fake capacity would pass. Before the verification of
+a local destination Rsync GUI therefore writes the cached data of the destination's file system to
+the disk (`syncfs`, shown as *Writing to the disk*) and drops the copies from the cache
+(`posix_fadvise(POSIX_FADV_DONTNEED)` for each file; the log says how many). This needs no root
+and only clean pages are dropped, so no data can be lost. Checked with a FAT image whose bytes were
+changed underneath the mounted file system: without dropping the cache the comparison found no
+difference, after it the damaged file was reported. Limits: the drive's own cache may still answer
+the reads, files used by other programs (memory-mapped) may stay in memory, and for remote
+destinations the cache of the server cannot be dropped (the log says so).
+
 ![The log after copying with verification](docs/screenshots/rsync-gui-finished.png)
 
 **Moving with verification.** With both *Remove source files* and *Verify* on (the *Move and verify*

@@ -32,15 +32,17 @@
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 - [x] Remote tests against an ssh server in a container (`tools/ssh-test/run.sh`): both directions,
       non-UTF-8 names, verified move, remote source move, cancelling, password and host key via `SSH_ASKPASS`
+- [x] Verification reads the disk: before it, `syncfs` + `POSIX_FADV_DONTNEED` for the copies (local destinations),
+      checked with a FAT image changed underneath the mounted file system
 - [x] `--modify-window=1` added automatically for destinations that keep times only to 2 s (FAT),
-      detected by setting a time with an odd second on a temporary file (checked on FAT32/exFAT images)
+      detected by setting a time with an odd second on a temporary file (checked on FAT32/exFAT images);
+      an option turns it off
 
 ## To do
 
 - [ ] Later: unknown ssh host keys - the tests show that ssh asks the question through `SSH_ASKPASS`
       (Plasma sets ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`); check by hand that ksshaskpass shows it,
       otherwise a dialog of our own (fingerprint from `ssh-keyscan`)
-- [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
