@@ -191,7 +191,8 @@ starts after clicking *Copy* (`Enter`). Several selected items end up in one win
 `sftp://` locations (Dolphin browsing a server) are supported — remote sources are copied with
 `rsync` over `ssh` (`sftp://user@host:port/path` → `-e "ssh -p port" user@host:/path`), so the host
 must be reachable without typing in a terminal: ssh keys / an agent, or a password asked through
-`SSH_ASKPASS` (e.g. `ksshaskpass` on KDE); the host key must already be known.
+`SSH_ASKPASS` (e.g. `ksshaskpass` on KDE). The question about an unknown host key is asked the same
+way when `SSH_ASKPASS_REQUIRE=prefer` is set (Plasma sets it); otherwise the host key must already be known.
 
 If you used your own rsync service menu before, remove it to avoid duplicated entries.
 New entries usually appear immediately; if not, run `kbuildsycoca6`.

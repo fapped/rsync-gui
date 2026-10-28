@@ -37,14 +37,13 @@
 - [x] `--modify-window=1` added automatically for destinations that keep times only to 2 s (FAT),
       detected by setting a time with an odd second on a temporary file (checked on FAT32/exFAT images);
       an option turns it off
+- [x] Unknown ssh host keys: ssh asks through `SSH_ASKPASS` (Plasma: ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`),
+      the question about the host key and the password checked by the user in the GUI (2026-10-28)
 
 ## To do
 
 - [ ] Later: the speed graph also in the application window, not only in the Plasma notification
       (e.g. a live speed graph in place of the progress bar, with the progress shown over it)
-- [ ] Later: unknown ssh host keys - the tests show that ssh asks the question through `SSH_ASKPASS`
-      (Plasma sets ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`); check by hand that ksshaskpass shows it,
-      otherwise a dialog of our own (fingerprint from `ssh-keyscan`)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
