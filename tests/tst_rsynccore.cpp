@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QProcess>
 #include <QSettings>
 #include <QSignalSpy>
@@ -16,6 +17,7 @@
 #include <QRandomGenerator>
 #include <QScopeGuard>
 #include <QTest>
+#include <QTimer>
 
 #include <cstring>
 #include <vector>
@@ -271,6 +273,9 @@ private slots:
     void destinationPaths();
     void dropFromPageCache();
     void verifyReadsFromDisk();
+    void cancelDuringCacheDrop_data();
+    void cancelDuringCacheDrop();
+    void deleteJobDuringCacheDrop();
     void remoteRoundTrip();
     void remoteVerifiedMove();
     void remoteSourceMove();
@@ -1588,6 +1593,100 @@ void TestRsyncCore::verifyReadsFromDisk()
     const qsizetype dropIndex = log.indexOf(dropped.first());
     QVERIFY(dropIndex > log.indexOf(QStringLiteral("Transfer finished.")));
     QVERIFY(dropIndex < log.indexOf(QStringLiteral("--- Verifying ---")));
+}
+
+void TestRsyncCore::cancelDuringCacheDrop_data()
+{
+    QTest::addColumn<bool>("whileRunning");
+    // Cancelled when the phase starts (before the thread looks at any file), and from the event loop
+    // while the thread walks the copies (or right after it - the outcome must be the same).
+    QTest::newRow("at the start") << false;
+    QTest::newRow("while running") << true;
+}
+
+void TestRsyncCore::cancelDuringCacheDrop()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QFETCH(bool, whileRunning);
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    for (int i = 0; i < 2000; ++i)
+        writeFile(tmp.filePath(QStringLiteral("src/d%1/f%2").arg(i % 20).arg(i)), "x");
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    // A verified move: cancelling before the verification must leave every source in place.
+    RsyncOptions options = testOptions();
+    options.removeSourceFiles = true;
+    options.removeSourceDirs = true;
+    options.verifyAfter = true;
+    RsyncJob job(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    QStringList log;
+    connect(&job, &RsyncJob::log, this, [&log](RsyncJob::LogLevel, const QString &text) { log << text; });
+    bool cancelled = false;
+    connect(&job, &RsyncJob::phaseChanged, this, [&](const QString &phase) {
+        if (phase != QLatin1String("Writing to the disk") || cancelled)
+            return;
+        cancelled = true;
+        if (whileRunning)
+            QTimer::singleShot(0, &job, &RsyncJob::cancel);
+        else
+            job.cancel();
+    });
+    QVERIFY(runJob(job));
+    QVERIFY(cancelled);
+    QVERIFY(job.summary().cancelled);
+    QCOMPARE(job.summary().transfersOk, 1);
+    QCOMPARE(job.summary().verifyFailed, 1);
+    QCOMPARE(job.summary().verified, 0);
+    QCOMPARE(job.summary().sourcesRemoved, 0);
+    QVERIFY(!log.contains(QStringLiteral("--- Verifying ---")));
+    QVERIFY(log.contains(QStringLiteral("Verification cancelled.")));
+    QVERIFY(log.contains(QStringLiteral("The sources were not removed, because the verification did not pass.")));
+    // Copied, and still in the source.
+    QCOMPARE(readFile(tmp.filePath("src/d7/f1987")), QByteArray("x"));
+    QCOMPARE(readFile(dest + "/src/d7/f1987"), QByteArray("x"));
+    QCOMPARE(QDir(tmp.filePath("src")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 20);
+}
+
+void TestRsyncCore::deleteJobDuringCacheDrop()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    for (int i = 0; i < 2000; ++i)
+        writeFile(tmp.filePath(QStringLiteral("src/f%1").arg(i)), "x");
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    // E.g. the window is closed: the destructor stops the thread and waits for it, nothing is called afterwards.
+    RsyncOptions options = testOptions();
+    options.verifyAfter = true;
+    auto *job = new RsyncJob(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    QPointer<RsyncJob> guard = job;
+    bool finished = false;
+    const auto threads = [] { return QDir(QStringLiteral("/proc/self/task")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(); };
+    const qsizetype threadsBefore = threads();
+    qsizetype threadsDuring = 0;
+    qsizetype threadsAfter = 0;
+    connect(job, &RsyncJob::finished, this, [&finished] { finished = true; });
+    connect(job, &RsyncJob::phaseChanged, this, [&, job](const QString &phase) {
+        if (phase != QLatin1String("Writing to the disk"))
+            return;
+        QTimer::singleShot(0, job, [&, job] {
+            threadsDuring = threads();
+            delete job;
+            threadsAfter = threads(); // the thread has ended, not just been left behind
+        });
+    });
+    job->start();
+    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 30000);
+    QTest::qWait(200); // a queued call from the thread would arrive now
+    QVERIFY(!finished);
+    QVERIFY2(threadsDuring > threadsBefore, "the cache was not being dropped in a thread when the job was deleted");
+    QCOMPARE(threadsAfter, threadsBefore);
 }
 
 void TestRsyncCore::remoteRoundTrip()
