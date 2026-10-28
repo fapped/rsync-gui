@@ -18,7 +18,9 @@
 #include <vector>
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
 namespace {
@@ -256,6 +258,49 @@ bool RsyncJob::parseDifferenceLine(const QString &line, QString *name)
     if (name)
         *name = m.captured(1);
     return true;
+}
+
+bool RsyncJob::isFatFileSystem(const QString &path)
+{
+    constexpr long kMsdosSuperMagic = 0x4d44; // vfat and msdos, see statfs(2)
+    struct statfs fs;
+    return ::statfs(LocalPath::encode(path).constData(), &fs) == 0 && long(fs.f_type) == kMsdosSuperMagic;
+}
+
+int RsyncJob::modifyWindowFor(const QString &localDestination, bool mayWrite)
+{
+    // The destination may not exist yet (rsync or the window creates it) - its parent decides then.
+    QByteArray dir = LocalPath::encode(QDir::cleanPath(localDestination));
+    struct stat st;
+    while (::stat(dir.constData(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+        const qsizetype slash = dir.lastIndexOf('/');
+        if (slash <= 0)
+            return 0;
+        dir.truncate(slash);
+    }
+    const int byType = isFatFileSystem(LocalPath::decode(dir)) ? 1 : 0;
+    if (!mayWrite)
+        return byType;
+
+    QByteArray probe = dir + "/.rsync-gui-time-XXXXXX";
+    const int fd = ::mkostemp(probe.data(), O_CLOEXEC);
+    if (fd < 0)
+        return byType;
+    // 2001-09-09 01:46:41 UTC - an odd second, as precise as rsync compares (it ignores nanoseconds).
+    constexpr time_t kOddSecond = 1000000001;
+    const struct timespec times[2] = {{kOddSecond, 0}, {kOddSecond, 0}};
+    int window = byType;
+    if (::futimens(fd, times) == 0) {
+        // Read back by name (not fstat): some file systems (e.g. FUSE) round only when they store the time.
+        ::close(fd);
+        struct stat result;
+        if (::stat(probe.constData(), &result) == 0)
+            window = result.st_mtim.tv_sec == kOddSecond ? 0 : 1;
+    } else {
+        ::close(fd);
+    }
+    ::unlink(probe.constData());
+    return window;
 }
 
 QString RsyncJob::exitCodeDescription(int code)

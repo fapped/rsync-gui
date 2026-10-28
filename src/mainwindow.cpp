@@ -802,6 +802,8 @@ void MainWindow::updateDestinationInfo()
             text = storage.isValid() && LocalPath::isPlain(dest.path)
                 ? tr("Existing directory, %1 free.").arg(QLocale().formattedDataSize(storage.bytesAvailable()))
                 : tr("Existing directory.");
+            if (RsyncJob::isFatFileSystem(dest.path))
+                text += tr(" FAT file system: file times are compared with a tolerance of 1 s (--modify-window=1).");
         } else if (LocalPath::info(dest.path).exists) {
             text = tr("<b>Not a directory:</b> %1").arg(LocalPath::display(dest.path).toHtmlEscaped());
         } else {
@@ -1066,7 +1068,7 @@ void MainWindow::startCopy()
     if (m_job && m_job->isRunning())
         return;
 
-    const RsyncOptions options = currentOptions();
+    RsyncOptions options = currentOptions();
     if (const QString error = options.validate(); !error.isEmpty()) {
         QMessageBox::warning(this, tr("Invalid options"), error);
         return;
@@ -1108,6 +1110,10 @@ void MainWindow::startCopy()
             return;
         }
     }
+
+    // FAT keeps file times to 2 s: without a tolerance rsync would copy half of the files again on every run.
+    if (!dest.isRemote() && (options.archive || options.times))
+        options.modifyWindow = RsyncJob::modifyWindowFor(dest.path, !options.dryRun);
 
     // Copying is not destructive - only the options that delete files are confirmed.
     if (!options.dryRun && (options.deleteExtraneous || options.removeSourceFiles)) {
@@ -1167,6 +1173,12 @@ void MainWindow::startCopy()
     appendLogLines(RsyncJob::LogLevel::Info,
                    tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())),
                    true);
+    if (options.modifyWindow > 0) {
+        appendLog(RsyncJob::LogLevel::Info,
+                  tr("The destination keeps file times only to 2 seconds (FAT) - added --modify-window=%1, "
+                     "so that unchanged files are not copied again.")
+                      .arg(options.modifyWindow));
+    }
     // Without progress output from rsync the bar can only show that something is happening.
     if (options.progress == RsyncOptions::Progress::None && !options.canVerify())
         m_progress->setRange(0, 0);

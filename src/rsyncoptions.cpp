@@ -205,11 +205,18 @@ QStringList RsyncOptions::buildArguments(int port, bool removeSources) const
         longOptions << QStringLiteral("--remove-source-files");
     if (useBwLimit)
         longOptions << QStringLiteral("--bwlimit=") + bwLimit.trimmed();
+    const QStringList extra = extraArgumentList();
+    if (modifyWindow > 0 && (archive || times)
+        && std::none_of(extra.cbegin(), extra.cend(), [](const QString &arg) {
+               return arg.startsWith(QLatin1String("--modify-window")) || arg.startsWith(QLatin1String("-@"));
+           })) {
+        longOptions << QStringLiteral("--modify-window=%1").arg(modifyWindow);
+    }
 
     QStringList args;
     if (!flags.isEmpty())
         args << QLatin1Char('-') + flags;
-    args << longOptions << remoteShellArguments(port) << extraArgumentList();
+    args << longOptions << remoteShellArguments(port) << extra;
     return args;
 }
 

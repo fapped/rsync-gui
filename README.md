@@ -137,6 +137,23 @@ you can also add your own presets (any `*.json` name, format as below).
 
 ![File > Load preset](docs/screenshots/rsync-gui-presets.png)
 
+## FAT destinations (`--modify-window`)
+
+FAT stores file times only to 2 seconds. A file with an odd second gets a different time on the
+drive, so rsync's quick check (size and time) sees half of the files as changed and copies them
+again on every run. When a copy starts with times kept (`-a` or `-t`) and a local destination, Rsync
+GUI checks the destination: a temporary file (`.rsync-gui-time-…`, removed right away) gets a time
+with an odd second and the time read back is compared. If it was rounded, `--modify-window=1` is
+added (the log says so) - times that differ by at most 1 second count as equal. A dry run writes
+nothing, there the file system type decides (vfat); the destination line of the window shows the
+same for an existing FAT directory.
+
+Checked with loop-mounted images: on FAT32 the second run without the option copied 5 of 10 files
+again, with it none; exFAT (10 ms), NTFS and Linux file systems do not need it and do not get it.
+Not handled: remote destinations (not checked) and the shift by one hour after a change to or from
+summer time (FAT keeps local time) - such a run copies everything once more. An explicit
+`--modify-window` in the additional arguments takes precedence.
+
 ## Dolphin context menu
 
 After installation Dolphin shows an **Rsync** submenu for files and directories:

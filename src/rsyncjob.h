@@ -88,6 +88,14 @@ public:
     // that differs or is missing in the destination; `name` receives the entry name.
     static bool parseDifferenceLine(const QString &line, QString *name = nullptr);
     static QString exitCodeDescription(int code);
+    // The --modify-window a local destination needs: 1 if its file system keeps file times less precisely
+    // than to the second (FAT: 2 s - without it every file with an odd second is copied again on every run),
+    // else 0. Tries it: a temporary file in the destination (or its nearest existing parent) gets a time
+    // with an odd second, and the time read back is compared. Without `mayWrite` (a dry run) or when the
+    // file cannot be created, the file system type decides (FAT).
+    static int modifyWindowFor(const QString &localDestination, bool mayWrite = true);
+    // Whether the file system of an existing path is FAT (vfat / msdos) - by the type only, nothing is written.
+    static bool isFatFileSystem(const QString &path);
     // Removes the empty directories in `dir` (deepest first) and `dir` itself unless `keepTop`.
     // Only rmdir() is used, so a directory that is not empty is never touched; symlinks are not
     // followed and other file systems are not entered. Returns the number of removed directories;

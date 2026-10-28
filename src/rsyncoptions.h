@@ -57,6 +57,9 @@ struct RsyncOptions
     bool useRemoteShell = false; // -e
     QString remoteShell;
     QString extraArguments;    // split like a shell command line
+    // Not an option of the window and not saved: set for a run when the destination keeps file times
+    // less precisely than rsync compares them (FAT: 2 s), see RsyncJob::modifyWindowFor().
+    int modifyWindow = 0;      // --modify-window (with -t, unless given in extraArguments)
 
     // The options for a copy. `port` (if non-zero) is added to the remote shell command.
     // For a verified move (see verifiedMove()) the copy does not remove the sources yet.

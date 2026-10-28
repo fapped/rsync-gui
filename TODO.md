@@ -30,17 +30,22 @@
 - [x] Recently used settings files (*File → Recent settings*)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
+- [x] `--modify-window=1` added automatically for destinations that keep times only to 2 s (FAT),
+      detected by setting a time with an odd second on a temporary file (checked on FAT32/exFAT images)
 
 ## To do
 
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
-- [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
-- [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
+- [ ] Later: ask for unknown ssh host keys in the GUI (ssh has no terminal; in Plasma `SSH_ASKPASS_REQUIRE=prefer`
+      may already show the question through ksshaskpass - to be checked)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
-- [ ] `--modify-window=1` as a checkbox (or automatically for FAT destinations, detected with `QStorageInfo`)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
       dialog or a custom one would be needed
 - [ ] Nautilus / Nemo integration (scripts or an extension)
-- [ ] `.deb` package / AppImage, CI (GitHub Actions: build + tests)
+- [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
+- [ ] Very low priority: start the copy right after choosing the destination from Dolphin (`--start`).
+      To consider instead: copy & paste - *Copy* in Dolphin (the URLs in the clipboard), then a service menu
+      entry on the destination directory, e.g. *Rsync → Paste here*, that takes the sources from the clipboard
+      (on Wayland the clipboard can be read only by a focused window - the window would have to show first)

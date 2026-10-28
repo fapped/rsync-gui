@@ -183,6 +183,8 @@ private slots:
     void presetNamesMatchDolphinMenu();
     void summaryFlags_data();
     void summaryFlags();
+    void modifyWindowArgument();
+    void modifyWindowProbe();
 };
 
 void TestRsyncCore::initTestCase()
@@ -1354,6 +1356,54 @@ void TestRsyncCore::presetNamesMatchDolphinMenu()
         QCOMPARE(label, presets.at(i).label + QStringLiteral("…"));
         QVERIFY2(exec.contains(QStringLiteral("--preset ") + presets.at(i).id + QLatin1Char(' ')), qPrintable(exec));
     }
+}
+
+void TestRsyncCore::modifyWindowArgument()
+{
+    RsyncOptions options;
+    QVERIFY(!options.arguments().join(QLatin1Char(' ')).contains(QStringLiteral("--modify-window")));
+    options.modifyWindow = 1;
+    QVERIFY(options.arguments().contains(QStringLiteral("--modify-window=1")));
+    QVERIFY(options.removalArguments().contains(QStringLiteral("--modify-window=1")));
+    // The verification compares content only.
+    QVERIFY(!options.verifyArguments().join(QLatin1Char(' ')).contains(QStringLiteral("--modify-window")));
+    // Without -t the times are not kept, so there is nothing to compare.
+    options.archive = false;
+    options.times = false;
+    QVERIFY(!options.arguments().join(QLatin1Char(' ')).contains(QStringLiteral("--modify-window")));
+    options.times = true;
+    QVERIFY(options.arguments().contains(QStringLiteral("--modify-window=1")));
+    // Given by the user: not added a second time.
+    options.extraArguments = QStringLiteral("--modify-window=3601");
+    QCOMPARE(options.arguments().filter(QStringLiteral("--modify-window")), QStringList{QStringLiteral("--modify-window=3601")});
+    options.extraArguments = QStringLiteral("-@ 2");
+    QVERIFY(options.arguments().filter(QStringLiteral("--modify-window")).isEmpty());
+    // Not a saved option.
+    RsyncOptions plain;
+    plain.modifyWindow = 1;
+    QVERIFY(!RsyncOptions::fromJson(plain.toJson()).modifyWindow);
+}
+
+void TestRsyncCore::modifyWindowProbe()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    // Linux file systems keep nanoseconds.
+    QCOMPARE(RsyncJob::modifyWindowFor(tmp.path()), 0);
+    QCOMPARE(RsyncJob::modifyWindowFor(tmp.filePath(QStringLiteral("not/created/yet"))), 0);
+    QCOMPARE(RsyncJob::modifyWindowFor(tmp.path(), false), 0);
+    QVERIFY(!RsyncJob::isFatFileSystem(tmp.path()));
+    // The probe file is removed again, and a missing destination is not created.
+    QCOMPARE(QDir(tmp.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot), QStringList());
+
+    // A mounted FAT file system, if there is one to test with (e.g. a loop-mounted image).
+    const QString fat = qEnvironmentVariable("RSYNC_GUI_TEST_FAT_DIR");
+    if (fat.isEmpty())
+        QSKIP("Set RSYNC_GUI_TEST_FAT_DIR to a writable directory on FAT to test the real case.");
+    QVERIFY(RsyncJob::isFatFileSystem(fat));
+    QCOMPARE(RsyncJob::modifyWindowFor(fat), 1);
+    QCOMPARE(RsyncJob::modifyWindowFor(fat, false), 1);
+    QCOMPARE(RsyncJob::modifyWindowFor(fat + QStringLiteral("/missing/dir")), 1);
 }
 
 QTEST_GUILESS_MAIN(TestRsyncCore)
