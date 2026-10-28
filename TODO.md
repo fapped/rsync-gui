@@ -19,6 +19,7 @@
 - [x] Installed to `~/.local`; the older service menu removed
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6)
+- [x] *Move…* Dolphin action and preset (`--remove-source-files` + removing emptied source directories)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 
@@ -26,7 +27,6 @@
 
 - [ ] Check the cancel button of the Plasma job notification by hand
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
-- [ ] "Move to…" Dolphin action (`--remove-source-files` + removing emptied source directories)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)

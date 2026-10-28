@@ -98,6 +98,7 @@ Installed into `<prefix>/share/rsync-gui/presets/`:
 | Copy | `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
 | Copy and verify | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
 | Copy to FAT/NTFS/NAS | `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
+| Move | `rsync-move` | `rsync -avhP --remove-source-files` + removing emptied directories | moves files and directories (asks for confirmation) |
 
 The name (the `name` field of the file) is shown in *File → Load preset* (sorted by name, the command
 and the file in the tooltip), in the title of the options section and — with "…" — in the Dolphin
@@ -116,7 +117,9 @@ After installation Dolphin shows an **Rsync** submenu for files and directories:
 
 - **Copy…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
 - **Copy and verify…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
-- **Copy to FAT/NTFS/NAS…** — `--preset rsync-copy-portable` (`rsync -rltvhP`).
+- **Copy to FAT/NTFS/NAS…** — `--preset rsync-copy-portable` (`rsync -rltvhP`),
+- **Move…** — `--preset rsync-move` (`rsync -avhP --remove-source-files`, then the emptied source
+  directories are removed; a confirmation is shown before it starts).
 
 Clicking an entry opens Rsync GUI with the selected items as sources and the preset loaded, and
 immediately asks for the destination directory (starting in the last used destination). The copy
@@ -218,6 +221,7 @@ with *Import settings…* become the new remembered options (unlike presets and 
         "contentsOnly": false,
         "deleteExtraneous": false,
         "removeSourceFiles": false,
+        "removeSourceDirs": false,
         "dryRun": false,
         "verifyAfter": false,
         "useBwLimit": false,
@@ -247,6 +251,13 @@ with *Import settings…* become the new remembered options (unlike presets and 
   sources in one rsync run, and one run per remote host (and port). Copying between two remote
   locations is not possible (rsync does not support it).
 - Missing local sources are reported and can be skipped; duplicates are skipped.
+- **Moving**: `--remove-source-files` makes rsync remove each transferred file from the source, but
+  it leaves all directories. With *Also remove source directories that are left empty*
+  (`removeSourceDirs`, on in the *Move* preset) the emptied directories of local sources are removed
+  after a successful transfer, deepest first — only with `rmdir`, so a directory that still contains
+  anything (an excluded file, a file that failed) stays and is reported. Symlinks are not followed,
+  other file systems are not entered, and with *Copy the contents of source directories* the source
+  directory itself stays. Remote sources keep their directories.
 - Copying a directory into itself (the destination inside a source directory) is refused.
 - Exit code 24 (some source files vanished during the transfer) is reported as a warning,
   other non-zero exit codes as errors, with the meaning of the code.

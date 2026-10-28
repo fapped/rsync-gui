@@ -37,6 +37,7 @@ set(RSYNC_GUI_PRESETS
     presets/rsync-copy.json
     presets/rsync-copy-verify.json
     presets/rsync-copy-portable.json
+    presets/rsync-move.json
 )
 foreach(preset IN LISTS RSYNC_GUI_PRESETS)
     configure_file(${preset} ${CMAKE_CURRENT_BINARY_DIR}/${preset} COPYONLY)

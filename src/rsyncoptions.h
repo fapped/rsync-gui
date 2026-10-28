@@ -49,6 +49,7 @@ struct RsyncOptions
     bool contentsOnly = false; // trailing "/" on local source directories
     bool deleteExtraneous = false; // --delete
     bool removeSourceFiles = false; // --remove-source-files
+    bool removeSourceDirs = false;  // remove local source directories left empty (with removeSourceFiles)
     bool dryRun = false;       // -n
     bool verifyAfter = false;  // second pass comparing checksums (not an rsync option)
     bool useBwLimit = false;   // --bwlimit
@@ -67,6 +68,8 @@ struct RsyncOptions
 
     // Whether the verification pass is meaningful for these options.
     bool canVerify() const { return verifyAfter && !dryRun && !removeSourceFiles; }
+    // Whether emptied source directories are removed after the transfer (not an rsync option).
+    bool removesSourceDirs() const { return removeSourceFiles && removeSourceDirs && !dryRun; }
 
     // Returns an empty string if the options are valid, otherwise an error description.
     QString validate() const;

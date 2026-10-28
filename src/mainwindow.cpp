@@ -264,10 +264,18 @@ void MainWindow::buildUi()
                                  "Files that exist only in the destination are deleted!"));
     m_removeSourceCheck = new QCheckBox(tr("Remove source files after copying - move (--remove-source-files)"), m_optionsBox);
     m_removeSourceCheck->setToolTip(tr("--remove-source-files: removes the transferred files from the source "
-                                       "(directories are left in place)"));
+                                       "(rsync leaves the directories in place)"));
+    m_removeSourceDirsCheck = new QCheckBox(tr("Also remove source directories that are left empty"), m_optionsBox);
+    m_removeSourceDirsCheck->setToolTip(tr("After a successful move, removes the emptied directories of local sources "
+                                           "(only empty ones - a directory with excluded or failed files stays). "
+                                           "With \"Copy the contents\" the source directory itself stays."));
     m_dryRunCheck = new QCheckBox(tr("Dry run - only show what would be done (-n)"), m_optionsBox);
     form->addRow(tr("Advanced:"), m_deleteCheck);
     form->addRow(QString(), m_removeSourceCheck);
+    auto *removeDirsRow = new QHBoxLayout;
+    removeDirsRow->addSpacing(24);
+    removeDirsRow->addWidget(m_removeSourceDirsCheck, 1);
+    form->addRow(QString(), removeDirsRow);
     form->addRow(QString(), m_dryRunCheck);
 
     m_verifyCheck = new QCheckBox(tr("Verify after copying (compare checksums of the source and the destination)"),
@@ -404,7 +412,7 @@ void MainWindow::buildUi()
         connect(box, &QCheckBox::toggled, this, refresh);
     for (QCheckBox *box : {m_archiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
                            m_checksumCheck, m_partialCheck, m_verboseCheck, m_humanCheck, m_compressCheck,
-                           m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck,
+                           m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck, m_removeSourceDirsCheck,
                            m_dryRunCheck, m_verifyCheck}) {
         connect(box, &QCheckBox::toggled, this, refresh);
     }
@@ -535,6 +543,7 @@ RsyncOptions MainWindow::currentOptions() const
     o.contentsOnly = m_contentsCheck->isChecked();
     o.deleteExtraneous = m_deleteCheck->isChecked();
     o.removeSourceFiles = m_removeSourceCheck->isChecked();
+    o.removeSourceDirs = m_removeSourceDirsCheck->isChecked();
     o.dryRun = m_dryRunCheck->isChecked();
     o.verifyAfter = m_verifyCheck->isChecked();
     o.extraArguments = m_extraEdit->text().trimmed();
@@ -570,6 +579,7 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     m_contentsCheck->setChecked(o.contentsOnly);
     m_deleteCheck->setChecked(o.deleteExtraneous);
     m_removeSourceCheck->setChecked(o.removeSourceFiles);
+    m_removeSourceDirsCheck->setChecked(o.removeSourceDirs);
     m_dryRunCheck->setChecked(o.dryRun);
     m_verifyCheck->setChecked(o.verifyAfter);
     m_extraEdit->setText(o.extraArguments);
@@ -780,6 +790,7 @@ void MainWindow::updateControls()
         box->setEnabled(!m_archiveCheck->isChecked());
     m_bwLimitEdit->setEnabled(m_bwLimitCheck->isChecked());
     m_remoteShellEdit->setEnabled(m_remoteShellCheck->isChecked());
+    m_removeSourceDirsCheck->setEnabled(m_removeSourceCheck->isChecked());
     m_removeSourcesButton->setEnabled(!m_sourceList->selectedItems().isEmpty());
     m_clearSourcesButton->setEnabled(m_sourceList->count() > 0);
     m_startButton->setEnabled(!running && m_sourceList->count() > 0 && destination().isValid());
@@ -1042,6 +1053,8 @@ void MainWindow::startCopy()
         if (options.removeSourceFiles)
             text += tr("<b>--remove-source-files</b>: the copied files will be <b>removed from the source</b> "
                        "(move).<br>");
+        if (options.removesSourceDirs())
+            text += tr("Source directories left empty will be removed too.<br>");
         text += tr("<br>Command:<br><code>%1</code><br><br>Consider a dry run (-n) first.")
                     .arg(commands.join(QStringLiteral("<br>")));
         QMessageBox box(QMessageBox::Warning, tr("Confirm"), text, QMessageBox::NoButton, this);

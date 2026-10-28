@@ -24,6 +24,7 @@
         "contentsOnly": false,
         "deleteExtraneous": false,
         "removeSourceFiles": false,
+        "removeSourceDirs": false,
         "dryRun": false,
         "verifyAfter": true
     }

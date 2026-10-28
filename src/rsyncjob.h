@@ -27,6 +27,7 @@ public:
         QString destination; // rsync argument, always ending with "/"
         int port = 0;        // ssh port for the remote side, 0 = default
         QString description; // "local files" or the remote origin, for the log
+        QStringList sourceDirs; // local source directories (for removing them after a move)
     };
 
     struct Plan
@@ -58,6 +59,7 @@ public:
         int verified = 0;
         int verifyFailed = 0;
         int differences = 0; // entries that differ after copying (verification pass)
+        int sourceDirsRemoved = 0; // emptied source directories removed after a move
         bool cancelled = false;
         bool aborted = false; // e.g. rsync could not be started
 
@@ -74,6 +76,11 @@ public:
     // that differs or is missing in the destination; `name` receives the entry name.
     static bool parseDifferenceLine(const QString &line, QString *name = nullptr);
     static QString exitCodeDescription(int code);
+    // Removes the empty directories in `dir` (deepest first) and `dir` itself unless `keepTop`.
+    // Only rmdir() is used, so a directory that is not empty is never touched; symlinks are not
+    // followed and other file systems are not entered. Returns the number of removed directories;
+    // `left` receives the directories that stay because they are not empty (or cannot be removed).
+    static int removeEmptyDirectories(const QString &dir, bool keepTop, QStringList *left = nullptr);
 
     RsyncJob(QList<Transfer> transfers, RsyncOptions options, QObject *parent = nullptr);
     ~RsyncJob() override;
@@ -104,6 +111,7 @@ private:
     void handleLine(const QString &line);
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
     void onProcessError(QProcess::ProcessError error);
+    void removeEmptiedSourceDirs(const Transfer &transfer);
     void finish();
     void emitProgress(double currentFraction);
 

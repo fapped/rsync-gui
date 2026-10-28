@@ -104,6 +104,8 @@ private slots:
     void verifyDetectsDifference();
     void dryRunChangesNothing();
     void moveRemovesSources();
+    void removeEmptyDirectories();
+    void moveRemovesEmptiedDirectories();
     void missingProgramAborts();
     void jsonRoundTrip();
     void jsonMissingKeysKeepBase();
@@ -673,6 +675,82 @@ void TestRsyncCore::moveRemovesSources()
     QVERIFY(QFileInfo(tmp.filePath("src")).isDir()); // rsync leaves directories in place
 }
 
+void TestRsyncCore::removeEmptyDirectories()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString root = tmp.filePath("root");
+    QVERIFY(QDir().mkpath(root + "/a/b/c"));
+    QVERIFY(QDir().mkpath(root + "/e"));
+    writeFile(root + "/d/file", "keep");
+    QVERIFY(QDir().mkpath(tmp.filePath("outside/empty")));
+    QVERIFY(QFile::link(tmp.filePath("outside"), root + "/a/link")); // keeps "a", is not followed
+
+    QStringList left;
+    QCOMPARE(RsyncJob::removeEmptyDirectories(root, false, &left), 3); // c, b, e
+    QVERIFY(!QFileInfo::exists(root + "/a/b"));
+    QVERIFY(!QFileInfo::exists(root + "/e"));
+    QVERIFY(QFileInfo(root + "/a/link").isSymLink());
+    QVERIFY(QFileInfo::exists(tmp.filePath("outside/empty")));
+    QCOMPARE(readFile(root + "/d/file"), QByteArray("keep"));
+    QCOMPARE(left, QStringList{root}); // only the outermost directory that stays is reported
+
+    QVERIFY(QFile::remove(root + "/a/link"));
+    QVERIFY(QFile::remove(root + "/d/file"));
+    QCOMPARE(RsyncJob::removeEmptyDirectories(root, true, &left), 2); // a, d - the root is kept
+    QVERIFY(QFileInfo(root).isDir());
+    QCOMPARE(RsyncJob::removeEmptyDirectories(root, false), 1);
+    QVERIFY(!QFileInfo::exists(root));
+    QCOMPARE(RsyncJob::removeEmptyDirectories(tmp.filePath("missing"), false), 0);
+}
+
+void TestRsyncCore::moveRemovesEmptiedDirectories()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a/1"), "1");
+    writeFile(tmp.filePath("src/a/b/2"), "2");
+    writeFile(tmp.filePath("src/keep/skip.tmp"), "excluded");
+    writeFile(tmp.filePath("contents/x/3"), "3");
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    RsyncOptions options = testOptions();
+    options.removeSourceFiles = true;
+    options.removeSourceDirs = true;
+    options.extraArguments = "--exclude=*.tmp";
+    const RsyncJob::Plan plan = localPlan({tmp.filePath("src")}, dest, options);
+    QCOMPARE(plan.transfers.first().sourceDirs, QStringList{tmp.filePath("src")});
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(readFile(dest + "/src/a/b/2"), QByteArray("2"));
+    QCOMPARE(job.summary().sourceDirsRemoved, 2); // a/b, a
+    QVERIFY(!QFileInfo::exists(tmp.filePath("src/a")));
+    QCOMPARE(readFile(tmp.filePath("src/keep/skip.tmp")), QByteArray("excluded")); // not moved, stays
+
+    // Contents only ("dir/"): the source directory itself stays.
+    options.contentsOnly = true;
+    options.extraArguments.clear();
+    RsyncJob contents(localPlan({tmp.filePath("contents")}, dest, options).transfers, options);
+    QVERIFY(runJob(contents));
+    QVERIFY(contents.summary().ok());
+    QCOMPARE(readFile(dest + "/x/3"), QByteArray("3"));
+    QVERIFY(!QFileInfo::exists(tmp.filePath("contents/x")));
+    QVERIFY(QFileInfo(tmp.filePath("contents")).isDir());
+
+    // Without the option rsync's behaviour is unchanged: directories stay.
+    writeFile(tmp.filePath("plain/y/4"), "4");
+    options.contentsOnly = false;
+    options.removeSourceDirs = false;
+    RsyncJob plain(localPlan({tmp.filePath("plain")}, dest, options).transfers, options);
+    QVERIFY(runJob(plain));
+    QVERIFY(QFileInfo(tmp.filePath("plain/y")).isDir());
+    QCOMPARE(plain.summary().sourceDirsRemoved, 0);
+}
+
 void TestRsyncCore::missingProgramAborts()
 {
     QTemporaryDir tmp;
@@ -840,6 +918,7 @@ void TestRsyncCore::shippedPresets_data()
     QTest::newRow("rsync-copy") << "rsync-copy" << QStringList{"-avhP"} << false;
     QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} << true;
     QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} << false;
+    QTest::newRow("rsync-move") << "rsync-move" << QStringList{"-avhP", "--remove-source-files"} << false;
 }
 
 void TestRsyncCore::shippedPresets()

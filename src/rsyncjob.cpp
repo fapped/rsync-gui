@@ -1,10 +1,20 @@
 #include "rsyncjob.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
 #include <QTimer>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <functional>
+
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -77,6 +87,7 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
         if (!source.isValid())
             continue;
         QString spec = source.rsyncSpec();
+        QString sourceDir;
         if (source.isRemote()) {
             if (destination.isRemote()) {
                 errors << tr("%1: rsync cannot copy between two remote locations.").arg(source.toString());
@@ -95,6 +106,8 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
             }
             if (isDir && options.contentsOnly && !spec.endsWith(QLatin1Char('/')))
                 spec += QLatin1Char('/');
+            if (isDir)
+                sourceDir = source.path;
         }
 
         const QString key = source.originKey() + QLatin1Char('\n') + spec;
@@ -120,6 +133,8 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
             result.transfers << transfer;
         }
         result.transfers[*it].sources << spec;
+        if (!sourceDir.isEmpty())
+            result.transfers[*it].sourceDirs << sourceDir;
     }
 
     if (!errors.isEmpty())
@@ -377,10 +392,12 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         } else if (success) {
             ++m_summary.transfersOk;
             emit log(LogLevel::Success, tr("Transfer finished."));
+            removeEmptiedSourceDirs(m_transfers.at(m_index));
             runVerify = m_options.canVerify();
         } else if (status == QProcess::NormalExit && exitCode == 24) {
             ++m_summary.transfersWithWarnings;
             emit log(LogLevel::Warning, tr("Transfer finished with warnings (%1).").arg(codeText));
+            removeEmptiedSourceDirs(m_transfers.at(m_index));
             runVerify = m_options.canVerify();
         } else {
             ++m_summary.transfersFailed;
@@ -429,6 +446,70 @@ void RsyncJob::onProcessError(QProcess::ProcessError error)
     m_process = nullptr;
     m_summary.aborted = true;
     finish();
+}
+
+int RsyncJob::removeEmptyDirectories(const QString &dir, bool keepTop, QStringList *left)
+{
+    const QByteArray root = QFile::encodeName(dir);
+    struct stat rootStat;
+    if (::lstat(root.constData(), &rootStat) != 0 || !S_ISDIR(rootStat.st_mode))
+        return 0;
+
+    // Post-order traversal: children first, then the directory itself.
+    int removed = 0;
+    const std::function<bool(const QByteArray &, bool)> visit = [&](const QByteArray &path, bool remove) -> bool {
+        if (DIR *d = ::opendir(path.constData())) {
+            QList<QByteArray> subdirs;
+            while (dirent *entry = ::readdir(d)) {
+                if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0)
+                    continue;
+                const QByteArray child = path + '/' + entry->d_name;
+                struct stat st;
+                if (::lstat(child.constData(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                    if (st.st_dev == rootStat.st_dev)
+                        subdirs << child;
+                    else if (left)
+                        *left << QFile::decodeName(child); // a mount point - never removed
+                }
+            }
+            ::closedir(d);
+            for (const QByteArray &sub : std::as_const(subdirs))
+                visit(sub, true);
+        }
+        if (!remove)
+            return false;
+        if (::rmdir(path.constData()) == 0) {
+            ++removed;
+            return true;
+        }
+        // Report only the outermost directories that stay (their parents stay anyway).
+        if (left && errno != ENOENT) {
+            const QString name = QFile::decodeName(path);
+            left->erase(std::remove_if(left->begin(), left->end(),
+                                       [&](const QString &l) { return l.startsWith(name + QLatin1Char('/')); }),
+                        left->end());
+            *left << name;
+        }
+        return false;
+    };
+    visit(root, !keepTop);
+    return removed;
+}
+
+void RsyncJob::removeEmptiedSourceDirs(const Transfer &transfer)
+{
+    if (!m_options.removesSourceDirs() || transfer.sourceDirs.isEmpty())
+        return;
+    for (const QString &dir : transfer.sourceDirs) {
+        QStringList left;
+        // With a trailing "/" only the content was moved - the directory itself stays.
+        const int removed = removeEmptyDirectories(dir, m_options.contentsOnly, &left);
+        m_summary.sourceDirsRemoved += removed;
+        if (removed > 0)
+            emit log(LogLevel::Info, tr("Removed %1 emptied source director(y/ies) in %2").arg(removed).arg(dir));
+        for (const QString &path : std::as_const(left))
+            emit log(LogLevel::Warning, tr("Source directory not empty - left in place: %1").arg(path));
+    }
 }
 
 void RsyncJob::finish()

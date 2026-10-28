@@ -129,6 +129,7 @@ private:
     QCheckBox *m_contentsCheck = nullptr;
     QCheckBox *m_deleteCheck = nullptr;
     QCheckBox *m_removeSourceCheck = nullptr;
+    QCheckBox *m_removeSourceDirsCheck = nullptr;
     QCheckBox *m_dryRunCheck = nullptr;
     QCheckBox *m_verifyCheck = nullptr;
     QLineEdit *m_extraEdit = nullptr;

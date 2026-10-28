@@ -70,6 +70,7 @@ constexpr BoolOption kBoolOptions[] = {
     {"contentsOnly", &RsyncOptions::contentsOnly},
     {"deleteExtraneous", &RsyncOptions::deleteExtraneous},
     {"removeSourceFiles", &RsyncOptions::removeSourceFiles},
+    {"removeSourceDirs", &RsyncOptions::removeSourceDirs},
     {"dryRun", &RsyncOptions::dryRun},
     {"verifyAfter", &RsyncOptions::verifyAfter},
     {"useBwLimit", &RsyncOptions::useBwLimit},
