@@ -68,6 +68,8 @@ if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     qt_add_executable(tst_rsynccore tests/tst_rsynccore.cpp)
     target_link_libraries(tst_rsynccore PRIVATE rsynccore Qt6::Test)
-    target_compile_definitions(tst_rsynccore PRIVATE RSYNC_GUI_SOURCE_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/presets")
+    target_compile_definitions(tst_rsynccore PRIVATE
+        RSYNC_GUI_SOURCE_PRESETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/presets"
+        RSYNC_GUI_SOURCE_SERVICEMENU="${CMAKE_CURRENT_SOURCE_DIR}/packaging/servicemenus/rsync-gui.desktop.in")
     add_test(NAME tst_rsynccore COMMAND tst_rsynccore)
 endif()

@@ -12,6 +12,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -438,6 +439,25 @@ QMap<QString, QString> RsyncOptions::availablePresets(const QStringList &searchP
         }
     }
     return presets;
+}
+
+QList<RsyncPreset> RsyncOptions::presets(const QStringList &searchPaths)
+{
+    QList<RsyncPreset> list;
+    const QMap<QString, QString> files = availablePresets(searchPaths);
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        RsyncPreset preset;
+        preset.id = it.key();
+        preset.file = it.value();
+        preset.options = loadFromFile(preset.file, &preset.error, RsyncOptions(), &preset.name);
+        if (preset.name.isEmpty())
+            preset.name = preset.id;
+        list << preset;
+    }
+    std::sort(list.begin(), list.end(), [](const RsyncPreset &a, const RsyncPreset &b) {
+        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    });
+    return list;
 }
 
 bool RsyncOptions::isValidBwLimit(const QString &limit)

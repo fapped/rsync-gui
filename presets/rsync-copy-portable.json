@@ -1,7 +1,7 @@
 {
     "format": "rsync-gui-settings",
     "version": 1,
-    "name": "Copy to FAT/exFAT/NTFS or NAS (rsync -rltvhP)",
+    "name": "Copy to FAT/NTFS/NAS",
     "options": {
         "archive": false,
         "recursive": true,

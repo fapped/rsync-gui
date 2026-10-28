@@ -90,11 +90,15 @@ The Dolphin menu can be skipped with `cmake -S . -B build -DRSYNC_GUI_INSTALL_SE
 
 Installed into `<prefix>/share/rsync-gui/presets/`:
 
-| Preset | Command | Effect |
-|---|---|---|
-| `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
-| `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
-| `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
+| Name (menus) | Preset (`--preset`) | Command | Effect |
+|---|---|---|---|
+| Copy | `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
+| Copy and verify | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
+| Copy to FAT/NTFS/NAS | `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
+
+The name (the `name` field of the file) is shown in *File → Load preset* (sorted by name, the command
+and the file in the tooltip), in the title of the options section and — with "…" — in the Dolphin
+menu, in the same order. `--preset` and `--list-presets` use the file names.
 
 Presets set the copy options but not the program, the remote shell, the bandwidth limit or the
 additional arguments — those stay as chosen by the user. They are searched for in this order:
@@ -107,8 +111,8 @@ you can also add your own presets (any `*.json` name, format as below).
 
 After installation Dolphin shows an **Rsync** submenu for files and directories:
 
-- **Copy to…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
-- **Copy and verify to…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
+- **Copy…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
+- **Copy and verify…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
 - **Copy to FAT/NTFS/NAS…** — `--preset rsync-copy-portable` (`rsync -rltvhP`).
 
 Clicking an entry opens Rsync GUI with the selected items as sources and the preset loaded, and
@@ -205,7 +209,7 @@ with *Import settings…* become the new remembered options (unlike presets and 
 - `recursive`, `links`, `perms`, `times`, `group`, `owner`, `devices` (`-rlptgoD`) are used only
   when `archive` is false (`-a` implies them all),
 - `extraArguments` is split like a shell command line (quotes and backslashes),
-- `name` (optional) — the name shown in the window and in the log,
+- `name` (optional) — the name shown in the window, in *Load preset* and in the log,
 - keys missing from `options` keep the current values from the window, unknown keys are ignored,
 - a file with a value of the wrong type, an unknown `format` or a newer `version` is rejected
   as a whole (the options in the window stay unchanged).

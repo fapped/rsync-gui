@@ -14,10 +14,11 @@
 - [x] Verification pass (checksum dry run with itemized differences)
 - [x] Command preview, progress (per file / overall), speed and ETA, log, cancellation
 - [x] Remembered options, JSON export/import (+ `--config`), presets `rsync-copy` / `rsync-copy-verify`
-- [x] Dolphin context menu (*Rsync* submenu: Copy to…, Copy and verify to…), installed by CMake
+- [x] Dolphin context menu (*Rsync* submenu: Copy…, Copy and verify…), installed by CMake
       with the absolute program path
 - [x] Installed to `~/.local`; the older service menu removed
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
+- [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 
 ## To do
 
@@ -35,11 +36,6 @@
         `KUiServerV2JobTracker` from KF6 JobWidgets + a `KJob` wrapping `RsyncJob`, or `org.kde.JobViewServerV2`
         over D-Bus directly to avoid the KF6 dependency
       - both optional at runtime (no-op outside KDE / without the D-Bus services)
-- [ ] Consistent preset names (asked 2026-10-25, for later): *File → Load preset* shows file names
-      (`rsync-copy`, `rsync-copy-verify`, `rsync-copy-portable`), the presets' `name` fields say
-      "Copy (rsync -avhP)" etc., and Dolphin says "Copy to…", "Copy and verify to…", "Copy to FAT/NTFS/NAS…".
-      Show the `name` in the menu (file name as a tooltip, `--preset` keeps using file names) and make the
-      three places use the same wording, e.g. "Copy", "Copy and verify", "Copy to FAT/NTFS/NAS"
 - [ ] "Close when finished" checkbox (asked 2026-10-25, for later): quit Rsync GUI after the job ends.
       Only on full success (`Summary::ok()`) — after errors, verification differences or cancellation
       the window stays open with the log. To decide: a remembered window preference, or an option in

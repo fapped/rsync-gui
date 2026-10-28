@@ -1,7 +1,7 @@
 {
     "format": "rsync-gui-settings",
     "version": 1,
-    "name": "Copy and verify (rsync -avhPc + checksum pass)",
+    "name": "Copy and verify",
     "options": {
         "archive": true,
         "recursive": true,

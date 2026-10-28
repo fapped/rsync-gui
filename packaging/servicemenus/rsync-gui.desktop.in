@@ -9,12 +9,12 @@ Icon=folder-sync
 Actions=rsyncCopy;rsyncCopyVerify;rsyncCopyPortable;
 
 [Desktop Action rsyncCopy]
-Name=Copy to…
+Name=Copy…
 Icon=folder-sync
 Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy --browse-destination %U
 
 [Desktop Action rsyncCopyVerify]
-Name=Copy and verify to…
+Name=Copy and verify…
 Icon=security-high
 Exec=@RSYNC_GUI_EXECUTABLE@ --preset rsync-copy-verify --browse-destination %U
 

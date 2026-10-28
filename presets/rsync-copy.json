@@ -1,7 +1,7 @@
 {
     "format": "rsync-gui-settings",
     "version": 1,
-    "name": "Copy (rsync -avhP)",
+    "name": "Copy",
     "options": {
         "archive": true,
         "recursive": true,

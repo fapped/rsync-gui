@@ -425,17 +425,27 @@ void MainWindow::buildMenus()
 void MainWindow::populatePresetMenu()
 {
     m_presetMenu->clear();
-    const QMap<QString, QString> presets = RsyncOptions::availablePresets();
+    // The same names as in the Dolphin menu; the file and the command are in the tooltip.
+    const QList<RsyncPreset> presets = RsyncOptions::presets();
     if (presets.isEmpty()) {
         m_presetMenu->addAction(tr("No presets found"))->setEnabled(false);
         return;
     }
-    for (auto it = presets.cbegin(); it != presets.cend(); ++it) {
-        const QString file = it.value();
-        QAction *action = m_presetMenu->addAction(it.key(), this, [this, file] {
+    m_presetMenu->setToolTipsVisible(true);
+    for (const RsyncPreset &preset : presets) {
+        const QString file = preset.file;
+        QAction *action = m_presetMenu->addAction(preset.name, this, [this, file] {
             importSettingsFile(file, Persistence::SessionOnly);
         });
-        action->setToolTip(file);
+        if (preset.error.isEmpty()) {
+            QString command = commandLine(QStringLiteral("rsync"), preset.options.arguments());
+            if (preset.options.canVerify())
+                command += tr(" + verification pass");
+            action->setToolTip(tr("%1\n%2").arg(command, file));
+        } else {
+            action->setEnabled(false);
+            action->setToolTip(preset.error);
+        }
     }
     m_presetMenu->addSeparator();
     m_presetMenu->addAction(tr("Presets are used for this session only"))->setEnabled(false);

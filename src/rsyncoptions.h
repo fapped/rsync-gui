@@ -6,6 +6,7 @@
 #include <QStringList>
 
 class QSettings;
+struct RsyncPreset;
 
 // The supported subset of rsync options. Everything else can be passed in `extraArguments`.
 struct RsyncOptions
@@ -88,6 +89,8 @@ struct RsyncOptions
     // Returns the file of the given preset or an empty string. A name containing '/' is treated as a path.
     static QString locatePreset(const QString &name, const QStringList &searchPaths = presetSearchPaths());
     static QMap<QString, QString> availablePresets(const QStringList &searchPaths = presetSearchPaths());
+    // Available presets sorted by name - the order of the Dolphin menu.
+    static QList<RsyncPreset> presets(const QStringList &searchPaths = presetSearchPaths());
 
     static bool isValidBwLimit(const QString &limit);
     static QString progressName(Progress progress);
@@ -97,6 +100,15 @@ struct RsyncOptions
 
     bool operator==(const RsyncOptions &other) const;
     bool operator!=(const RsyncOptions &other) const { return !(*this == other); }
+};
+
+struct RsyncPreset
+{
+    QString id;    // the file name without .json, used by --preset
+    QString file;
+    QString name;  // the "name" from the file (also the Dolphin menu label), else the id
+    QString error; // non-empty if the file cannot be loaded
+    RsyncOptions options; // the preset applied to the default options
 };
 
 QString shellQuote(const QString &arg);

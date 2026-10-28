@@ -116,6 +116,7 @@ private slots:
     void locatePresets();
     void shippedPresets_data();
     void shippedPresets();
+    void presetNamesMatchDolphinMenu();
 };
 
 void TestRsyncCore::initTestCase()
@@ -868,6 +869,45 @@ void TestRsyncCore::shippedPresets()
     withoutShell.useRemoteShell = false;
     QCOMPARE(withoutShell.arguments(), arguments);
     QCOMPARE(o.canVerify(), verify);
+}
+
+void TestRsyncCore::presetNamesMatchDolphinMenu()
+{
+    const QList<RsyncPreset> presets = RsyncOptions::presets({QStringLiteral(RSYNC_GUI_SOURCE_PRESETS_DIR)});
+    QVERIFY(presets.size() >= 3);
+    QStringList names;
+    for (const RsyncPreset &preset : presets) {
+        QVERIFY2(preset.error.isEmpty(), qPrintable(preset.error));
+        QVERIFY2(preset.name != preset.id, qPrintable(preset.id)); // every shipped preset has a name
+        names << preset.name;
+    }
+    QStringList sorted = names;
+    std::sort(sorted.begin(), sorted.end(), [](const QString &a, const QString &b) {
+        return a.compare(b, Qt::CaseInsensitive) < 0;
+    });
+    QCOMPARE(names, sorted);
+
+    // Every Dolphin action is "<preset name>…" and runs that preset; every preset has an action,
+    // listed in the same order as in File > Load preset.
+    // (QSettings cannot read .desktop files: ';' starts a comment there.)
+    QHash<QString, QString> entries; // "group/key" -> value
+    QString group;
+    const QStringList lines = QString::fromUtf8(readFile(QStringLiteral(RSYNC_GUI_SOURCE_SERVICEMENU))).split(QLatin1Char('\n'));
+    for (const QString &line : lines) {
+        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']')))
+            group = line.mid(1, line.size() - 2);
+        else if (const qsizetype eq = line.indexOf(QLatin1Char('=')); eq > 0)
+            entries.insert(group + QLatin1Char('/') + line.left(eq), line.mid(eq + 1));
+    }
+    const QStringList actions = entries.value(QStringLiteral("Desktop Entry/Actions")).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    QCOMPARE(actions.size(), presets.size());
+    for (qsizetype i = 0; i < actions.size(); ++i) {
+        const QString prefix = QStringLiteral("Desktop Action ") + actions.at(i) + QLatin1Char('/');
+        const QString label = entries.value(prefix + QStringLiteral("Name"));
+        const QString exec = entries.value(prefix + QStringLiteral("Exec"));
+        QCOMPARE(label, presets.at(i).name + QStringLiteral("…"));
+        QVERIFY2(exec.contains(QStringLiteral("--preset ") + presets.at(i).id + QLatin1Char(' ')), qPrintable(exec));
+    }
 }
 
 QTEST_GUILESS_MAIN(TestRsyncCore)

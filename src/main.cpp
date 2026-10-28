@@ -47,9 +47,9 @@ int main(int argc, char *argv[])
     parser.process(app);
 
     if (parser.isSet(listPresetsOption)) {
-        const QMap<QString, QString> presets = RsyncOptions::availablePresets();
-        for (auto it = presets.cbegin(); it != presets.cend(); ++it)
-            std::printf("%s\t%s\n", qPrintable(it.key()), qPrintable(it.value()));
+        const QList<RsyncPreset> presets = RsyncOptions::presets();
+        for (const RsyncPreset &preset : presets)
+            std::printf("%s\t%s\t%s\n", qPrintable(preset.id), qPrintable(preset.name), qPrintable(preset.file));
         if (presets.isEmpty()) {
             std::fprintf(stderr, "No presets found. Searched in:\n%s\n",
                          qPrintable(RsyncOptions::presetSearchPaths().join(QLatin1Char('\n'))));
