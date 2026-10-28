@@ -20,6 +20,7 @@
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6),
       speed graph in the notification (checked on screen with the user, Plasma 6.6.6)
+- [x] *Cancel* in the Plasma job notification cancels the transfer (checked by the user, 2026-10-28)
 - [x] *Move…* Dolphin action and preset (`--remove-source-files` + removing emptied source directories)
 - [x] *Move to FAT/NTFS/NAS (-rlt)…* preset and Dolphin action
 - [x] *Move and verify (-ac)…*: the sources are removed only after a successful verification
@@ -32,7 +33,6 @@
 
 ## To do
 
-- [ ] Check the cancel button of the Plasma job notification by hand
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
