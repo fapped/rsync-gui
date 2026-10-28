@@ -99,6 +99,7 @@ Installed into `<prefix>/share/rsync-gui/presets/`:
 | Copy and verify (-ac) | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
 | Copy to FAT/NTFS/NAS (-rlt) | `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
 | Move (-a) | `rsync-move` | `rsync -avhP --remove-source-files` + removing emptied directories | moves files and directories (asks for confirmation) |
+| Move and verify (-ac) | `rsync-move-verify` | `rsync -avhPc` + verification, then `--remove-source-files` | the sources are removed only after the verification found no differences |
 | Move to FAT/NTFS/NAS (-rlt) | `rsync-move-portable` | `rsync -rltvhP --remove-source-files` + removing emptied directories | the same for drives and shares without Unix permissions and owners |
 
 The label — the name (the `name` field of the file) followed by the flags that decide what is
@@ -125,6 +126,8 @@ After installation Dolphin shows an **Rsync** submenu for files and directories:
 - **Copy to FAT/NTFS/NAS (-rlt)…** — `--preset rsync-copy-portable` (`rsync -rltvhP`),
 - **Move (-a)…** — `--preset rsync-move` (`rsync -avhP --remove-source-files`, then the emptied source
   directories are removed; a confirmation is shown before it starts),
+- **Move and verify (-ac)…** — `--preset rsync-move-verify`: copy, verify, and only then remove the
+  sources (see below),
 - **Move to FAT/NTFS/NAS (-rlt)…** — `--preset rsync-move-portable` (the same with `-rlt`).
   Files the drive cannot store — larger than 4 GB on FAT32, names with `:` `?` `"` etc., symlinks on
   FAT — fail and stay in the source (rsync removes only files it transferred successfully). After such a
@@ -191,7 +194,14 @@ rsync -nrlci '--out-format=%i %n%L' <additional arguments> -- <sources> <destina
 Every file is read on both sides and its checksum compared; every entry that would be transferred
 (different content, missing file, directory or symlink) is reported in the log and in a dialog. The
 additional arguments (e.g. `--exclude`) are passed too, so excluded files are not reported. The
-verification is skipped for a dry run and with `--remove-source-files` (the sources are gone).
+verification is skipped for a dry run.
+
+**Moving with verification.** With both *Remove source files* and *Verify* on (the *Move and verify*
+preset), the sources are not removed during the copy. After the verification has found no
+differences, rsync runs a third time with `--remove-source-files`: everything is already up to date,
+so it transfers nothing (a file changed in the meantime would be transferred again) and only removes
+the source files; then the emptied directories are removed. If the verification finds a difference
+or fails, nothing in the source is touched.
 
 Note that files just written may still be in the page cache, so the destination is not necessarily
 read back from the disk itself.

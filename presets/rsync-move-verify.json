@@ -1,0 +1,31 @@
+{
+    "format": "rsync-gui-settings",
+    "version": 1,
+    "name": "Move and verify",
+    "options": {
+        "archive": true,
+        "recursive": true,
+        "links": true,
+        "perms": true,
+        "times": true,
+        "group": true,
+        "owner": true,
+        "devices": true,
+        "hardLinks": false,
+        "acls": false,
+        "xattrs": false,
+        "verbose": true,
+        "human": true,
+        "partial": true,
+        "progress": "per-file",
+        "checksum": true,
+        "existing": "replace",
+        "compress": false,
+        "contentsOnly": false,
+        "deleteExtraneous": false,
+        "removeSourceFiles": true,
+        "removeSourceDirs": true,
+        "dryRun": false,
+        "verifyAfter": true
+    }
+}

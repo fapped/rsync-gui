@@ -137,6 +137,16 @@ bool readString(const QJsonObject &json, const char *key, QString *out, QString 
 
 QStringList RsyncOptions::arguments(int port) const
 {
+    return buildArguments(port, removeSourceFiles && !verifiedMove());
+}
+
+QStringList RsyncOptions::removalArguments(int port) const
+{
+    return buildArguments(port, true);
+}
+
+QStringList RsyncOptions::buildArguments(int port, bool removeSources) const
+{
     // Single-letter options are grouped ("-avhP"), so the command looks like one typed by hand.
     QString flags;
     QStringList longOptions;
@@ -191,7 +201,7 @@ QStringList RsyncOptions::arguments(int port) const
         longOptions << QStringLiteral("--ignore-existing");
     if (deleteExtraneous)
         longOptions << QStringLiteral("--delete");
-    if (removeSourceFiles)
+    if (removeSources)
         longOptions << QStringLiteral("--remove-source-files");
     if (useBwLimit)
         longOptions << QStringLiteral("--bwlimit=") + bwLimit.trimmed();

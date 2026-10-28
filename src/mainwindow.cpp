@@ -287,7 +287,8 @@ void MainWindow::buildUi()
                                   m_optionsBox);
     m_verifyCheck->setToolTip(tr("After a successful transfer, runs rsync again as a dry run with --checksum "
                                  "--itemize-changes. Every file is read on both sides; any file that differs "
-                                 "or is missing is reported."));
+                                 "or is missing is reported.\nWhen moving, the sources are removed only after "
+                                 "the verification has passed."));
     form->addRow(tr("Verify:"), m_verifyCheck);
 
     m_extraEdit = new QLineEdit(m_optionsBox);
@@ -467,7 +468,9 @@ void MainWindow::populatePresetMenu()
         });
         if (preset.error.isEmpty()) {
             QString command = commandLine(QStringLiteral("rsync"), preset.options.arguments());
-            if (preset.options.canVerify())
+            if (preset.options.verifiedMove())
+                command += tr(" + verification pass, then --remove-source-files");
+            else if (preset.options.canVerify())
                 command += tr(" + verification pass");
             action->setToolTip(tr("%1\n%2").arg(command, file));
         } else {
@@ -827,7 +830,9 @@ void MainWindow::updatePreview()
         if (plan.transfers.size() > 1)
             text += tr("   (+ %1 more rsync run(s) for other hosts)").arg(plan.transfers.size() - 1);
     }
-    if (options.canVerify())
+    if (options.verifiedMove())
+        text += tr("   (+ verification pass, then the sources are removed)");
+    else if (options.canVerify())
         text += tr("   (+ verification pass)");
     m_previewEdit->setText(text);
     m_previewEdit->setCursorPosition(0);
@@ -859,7 +864,7 @@ void MainWindow::updateControls()
 
     QString error = currentOptions().validate();
     if (error.isEmpty() && m_verifyCheck->isChecked() && !currentOptions().canVerify())
-        error = tr("Verification is not done for a dry run or when source files are removed.");
+        error = tr("Verification is not done for a dry run.");
     statusBar()->showMessage(error);
 }
 
@@ -1110,7 +1115,10 @@ void MainWindow::startCopy()
         if (options.deleteExtraneous)
             text += tr("<b>--delete</b>: files in the destination that do not exist in the source will be "
                        "<b>deleted</b>.<br>");
-        if (options.removeSourceFiles)
+        if (options.verifiedMove())
+            text += tr("<b>--remove-source-files</b>: the copied files will be <b>removed from the source</b> "
+                       "(move) - only after the verification has found no differences.<br>");
+        else if (options.removeSourceFiles)
             text += tr("<b>--remove-source-files</b>: the copied files will be <b>removed from the source</b> "
                        "(move).<br>");
         if (options.removesSourceDirs())

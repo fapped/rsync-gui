@@ -21,6 +21,8 @@
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6)
 - [x] *Move…* Dolphin action and preset (`--remove-source-files` + removing emptied source directories)
 - [x] *Move to FAT/NTFS/NAS (-rlt)…* preset and Dolphin action
+- [x] *Move and verify (-ac)…*: the sources are removed only after a successful verification
+- [x] Preset labels with the flags that decide what is copied, e.g. *Copy to FAT/NTFS/NAS (-rlt)*
 - [x] File names that are not valid UTF-8: kept exactly (command line, URLs, drag & drop, clipboard),
       passed to rsync as bytes, shown with `\xNN`
 - [x] Recently used settings files (*File → Recent settings*)

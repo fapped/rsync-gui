@@ -59,7 +59,10 @@ struct RsyncOptions
     QString extraArguments;    // split like a shell command line
 
     // The options for a copy. `port` (if non-zero) is added to the remote shell command.
+    // For a verified move (see verifiedMove()) the copy does not remove the sources yet.
     QStringList arguments(int port = 0) const;
+    // The options of the removal pass of a verified move: the copy options with --remove-source-files.
+    QStringList removalArguments(int port = 0) const;
     // The options of the verification pass: a dry run that lists files whose content
     // differs (--checksum --itemize-changes), without changing anything.
     QStringList verifyArguments(int port = 0) const;
@@ -72,7 +75,10 @@ struct RsyncOptions
     QStringList extraArgumentList() const;
 
     // Whether the verification pass is meaningful for these options.
-    bool canVerify() const { return verifyAfter && !dryRun && !removeSourceFiles; }
+    bool canVerify() const { return verifyAfter && !dryRun; }
+    // A move with verification: copy, verify, and only after a successful verification remove the
+    // sources (a third rsync run with --remove-source-files, which transfers nothing any more).
+    bool verifiedMove() const { return removeSourceFiles && canVerify(); }
     // Whether emptied source directories are removed after the transfer (not an rsync option).
     bool removesSourceDirs() const { return removeSourceFiles && removeSourceDirs && !dryRun; }
 
@@ -107,6 +113,11 @@ struct RsyncOptions
     static bool existingFromName(const QString &name, Existing *existing);
 
     bool operator==(const RsyncOptions &other) const;
+
+private:
+    QStringList buildArguments(int port, bool removeSources) const;
+
+public:
     bool operator!=(const RsyncOptions &other) const { return !(*this == other); }
 };
 

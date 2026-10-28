@@ -155,6 +155,7 @@ private slots:
     void dryRunChangesNothing();
     void moveRemovesSources();
     void removeEmptyDirectories();
+    void verifiedMove();
     void moveRemovesEmptiedDirectories();
     void missingProgramAborts();
     void localPathRoundTrip_data();
@@ -281,8 +282,15 @@ void TestRsyncCore::verifyArguments()
     o.dryRun = true;
     QVERIFY(!o.canVerify());
     o.dryRun = false;
+    // A move with verification removes the sources only in a separate pass after the verification.
     o.removeSourceFiles = true;
-    QVERIFY(!o.canVerify());
+    QVERIFY(o.canVerify());
+    QVERIFY(o.verifiedMove());
+    QVERIFY(!o.arguments().contains(QStringLiteral("--remove-source-files")));
+    QVERIFY(o.removalArguments().contains(QStringLiteral("--remove-source-files")));
+    o.verifyAfter = false;
+    QVERIFY(!o.verifiedMove());
+    QVERIFY(o.arguments().contains(QStringLiteral("--remove-source-files")));
 }
 
 void TestRsyncCore::remoteShell()
@@ -761,6 +769,55 @@ void TestRsyncCore::removeEmptyDirectories()
     QCOMPARE(RsyncJob::removeEmptyDirectories(tmp.filePath("missing"), false), 0);
 }
 
+void TestRsyncCore::verifiedMove()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a/1"), "one");
+    writeFile(tmp.filePath("src/2"), "two");
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    RsyncOptions options = testOptions();
+    options.removeSourceFiles = true;
+    options.removeSourceDirs = true;
+    options.verifyAfter = true;
+
+    // A difference that only the verification sees (same size and time, quick check skips it):
+    // nothing in the source may be removed.
+    writeFile(dest + "/src/2", "TWO");
+    setMtime(tmp.filePath("src/2"), 1700000000);
+    setMtime(dest + "/src/2", 1700000000);
+    RsyncJob refused(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    QVERIFY(runJob(refused));
+    QCOMPARE(refused.summary().differences, 1);
+    QCOMPARE(refused.summary().sourcesRemoved, 0);
+    QVERIFY(!refused.summary().ok());
+    QCOMPARE(readFile(tmp.filePath("src/a/1")), QByteArray("one")); // copied, but still in the source
+    QCOMPARE(readFile(dest + "/src/a/1"), QByteArray("one"));
+    QCOMPARE(readFile(tmp.filePath("src/2")), QByteArray("two"));
+
+    // With -c the copy fixes the file, the verification passes and only then the sources go.
+    options.checksum = true;
+    RsyncJob move(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    QSignalSpy phases(&move, &RsyncJob::phaseChanged);
+    QVERIFY(runJob(move));
+    QVERIFY(move.summary().ok());
+    QCOMPARE(move.summary().verified, 1);
+    QCOMPARE(move.summary().sourcesRemoved, 1);
+    QCOMPARE(readFile(dest + "/src/2"), QByteArray("two"));
+    QCOMPARE(readFile(dest + "/src/a/1"), QByteArray("one"));
+    QVERIFY(!QFileInfo::exists(tmp.filePath("src"))); // files and the emptied directories
+    QStringList order;
+    for (const QList<QVariant> &args : std::as_const(phases)) {
+        if (!args.first().toString().isEmpty())
+            order << args.first().toString();
+    }
+    QCOMPARE(order, (QStringList{"Copying", "Verifying", "Removing the sources"}));
+}
+
 void TestRsyncCore::moveRemovesEmptiedDirectories()
 {
     if (!haveRsync())
@@ -1078,6 +1135,7 @@ void TestRsyncCore::shippedPresets_data()
     QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} << true;
     QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} << false;
     QTest::newRow("rsync-move") << "rsync-move" << QStringList{"-avhP", "--remove-source-files"} << false;
+    QTest::newRow("rsync-move-verify") << "rsync-move-verify" << QStringList{"-avhPc"} << true;
     QTest::newRow("rsync-move-portable") << "rsync-move-portable" << QStringList{"-rltvhP", "--remove-source-files"}
                                          << false;
 }

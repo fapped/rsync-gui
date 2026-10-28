@@ -60,12 +60,15 @@ public:
         int verifyFailed = 0;
         int differences = 0; // entries that differ after copying (verification pass)
         int sourceDirsRemoved = 0; // emptied source directories removed after a move
+        int sourcesRemoved = 0; // verified move: transfers whose sources were removed after the verification
+        int removalFailed = 0;
         bool cancelled = false;
         bool aborted = false; // e.g. rsync could not be started
 
         bool ok() const
         {
-            return !cancelled && !aborted && transfersFailed == 0 && verifyFailed == 0 && differences == 0;
+            return !cancelled && !aborted && transfersFailed == 0 && verifyFailed == 0 && differences == 0
+                && removalFailed == 0;
         }
     };
 
@@ -103,7 +106,7 @@ signals:
     void finished();
 
 private:
-    enum class Phase { Copy, Verify };
+    enum class Phase { Copy, Verify, Remove }; // Remove: the last pass of a verified move
 
     void startNext();
     void startProcess();

@@ -75,7 +75,7 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
         return result;
     }
     if (options.verifyAfter && !options.canVerify())
-        result.notes << tr("Verification is skipped (dry run or source files are removed).");
+        result.notes << tr("Verification is skipped for a dry run.");
 
     QString destSpec = destination.rsyncSpec();
     if (!destSpec.endsWith(QLatin1Char('/')))
@@ -216,7 +216,7 @@ RsyncJob::RsyncJob(QList<Transfer> transfers, RsyncOptions options, QObject *par
     , m_transfers(std::move(transfers))
     , m_options(std::move(options))
 {
-    m_stepsPerTransfer = m_options.canVerify() ? 2 : 1;
+    m_stepsPerTransfer = m_options.verifiedMove() ? 3 : m_options.canVerify() ? 2 : 1;
 }
 
 RsyncJob::~RsyncJob()
@@ -271,11 +271,24 @@ void RsyncJob::startNext()
 void RsyncJob::startProcess()
 {
     const Transfer &transfer = m_transfers.at(m_index);
-    QStringList args = m_phase == Phase::Copy ? m_options.arguments(transfer.port)
-                                              : m_options.verifyArguments(transfer.port);
+    QStringList args;
+    QString phase;
+    switch (m_phase) {
+    case Phase::Copy:
+        args = m_options.arguments(transfer.port);
+        phase = tr("Copying");
+        break;
+    case Phase::Verify:
+        args = m_options.verifyArguments(transfer.port);
+        phase = tr("Verifying");
+        break;
+    case Phase::Remove:
+        args = m_options.removalArguments(transfer.port);
+        phase = tr("Removing the sources");
+        break;
+    }
     args << QStringLiteral("--") << transfer.sources << transfer.destination;
 
-    QString phase = m_phase == Phase::Copy ? tr("Copying") : tr("Verifying");
     if (m_transfers.size() > 1)
         phase = tr("%1 %2 (%3/%4)").arg(phase, transfer.description).arg(m_index + 1).arg(m_transfers.size());
     emit phaseChanged(phase);
@@ -421,25 +434,29 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         } else if (success) {
             ++m_summary.transfersOk;
             emit log(LogLevel::Success, tr("Transfer finished."));
-            removeEmptiedSourceDirs(m_transfers.at(m_index));
+            if (!m_options.verifiedMove())
+                removeEmptiedSourceDirs(m_transfers.at(m_index));
             runVerify = m_options.canVerify();
         } else if (status == QProcess::NormalExit && exitCode == 24) {
             ++m_summary.transfersWithWarnings;
             emit log(LogLevel::Warning, tr("Transfer finished with warnings (%1).").arg(codeText));
-            removeEmptiedSourceDirs(m_transfers.at(m_index));
+            if (!m_options.verifiedMove())
+                removeEmptiedSourceDirs(m_transfers.at(m_index));
             runVerify = m_options.canVerify();
         } else {
             ++m_summary.transfersFailed;
             emit log(LogLevel::Error, tr("Transfer failed (%1).").arg(codeText));
             if (m_options.canVerify())
                 emit log(LogLevel::Warning, tr("Verification skipped because the transfer failed."));
+            if (m_options.verifiedMove())
+                emit log(LogLevel::Warning, tr("The sources were not removed."));
         }
         if (runVerify) {
             m_phase = Phase::Verify;
             startProcess();
             return;
         }
-    } else {
+    } else if (m_phase == Phase::Verify) {
         if (m_cancelRequested) {
             ++m_summary.verifyFailed;
             emit log(LogLevel::Warning, tr("Verification cancelled."));
@@ -458,6 +475,26 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         } else {
             ++m_summary.verified;
             emit log(LogLevel::Success, tr("Verification passed: the content of the destination matches the source."));
+            if (m_options.verifiedMove()) {
+                m_phase = Phase::Remove;
+                startProcess();
+                return;
+            }
+        }
+        if (m_options.verifiedMove())
+            emit log(LogLevel::Warning, tr("The sources were not removed, because the verification did not pass."));
+    } else {
+        // The removal pass of a verified move.
+        if (m_cancelRequested) {
+            ++m_summary.removalFailed;
+            emit log(LogLevel::Warning, tr("Removal cancelled - some sources may have been removed already."));
+        } else if (success || (status == QProcess::NormalExit && exitCode == 24)) {
+            ++m_summary.sourcesRemoved;
+            emit log(LogLevel::Success, tr("The sources were removed."));
+            removeEmptiedSourceDirs(m_transfers.at(m_index));
+        } else {
+            ++m_summary.removalFailed;
+            emit log(LogLevel::Error, tr("Removing the sources failed (%1).").arg(codeText));
         }
     }
 
@@ -559,6 +596,8 @@ void RsyncJob::finish()
                     .arg(s.differences)
                     .arg(s.verifyFailed);
     }
+    if (m_options.verifiedMove())
+        text += tr("; sources removed: %1, removal failed: %2").arg(s.sourcesRemoved).arg(s.removalFailed);
     if (m_options.dryRun)
         text += tr(" (dry run - nothing was changed)");
     if (s.cancelled)
@@ -580,6 +619,6 @@ void RsyncJob::emitProgress(double currentFraction)
     const qsizetype total = m_transfers.size() * m_stepsPerTransfer;
     if (total <= 0)
         return;
-    const qsizetype done = m_index * m_stepsPerTransfer + (m_phase == Phase::Verify ? 1 : 0);
+    const qsizetype done = m_index * m_stepsPerTransfer + (m_phase == Phase::Verify ? 1 : m_phase == Phase::Remove ? 2 : 0);
     emit progress(int(1000.0 * (done + currentFraction) / total));
 }
