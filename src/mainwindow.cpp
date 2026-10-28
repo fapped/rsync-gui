@@ -1190,9 +1190,12 @@ void MainWindow::startDesktopProgress(const RsyncOptions &options, const Locatio
         static const QRegularExpression percent(QStringLiteral("^\\d+%\\s*"));
         m_desktopProgress->setInfo(status.remove(percent));
     });
+    connect(m_job, &RsyncJob::transferRateChanged, m_desktopProgress, &DesktopProgress::setSpeed);
     connect(m_job, &RsyncJob::phaseChanged, m_desktopProgress, [this](const QString &phase) {
-        if (!phase.isEmpty())
-            m_desktopProgress->setTitle(phase);
+        if (phase.isEmpty())
+            return;
+        m_desktopProgress->setTitle(phase);
+        m_desktopProgress->setSpeed(0, -1); // verification and removal report no speed
     });
 }
 

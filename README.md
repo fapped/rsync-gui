@@ -175,7 +175,8 @@ While a transfer runs, its progress is also shown
   application),
 - as a job in the Plasma notification area (`org.kde.JobViewServerV2`): title (Copying / Verifying /
   Moving), source, destination, percentage, size, speed and ETA, a button that cancels the transfer,
-  and after it the result with a link to the destination.
+  and after it the result with a link to the destination. The speed (bytes/s) and the amount copied
+  are sent as numbers too, so Plasma can show them in its own format and draw the speed graph.
 
 On other desktops or without a session bus this does nothing.
 

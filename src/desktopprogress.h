@@ -22,6 +22,8 @@ public:
     void setTitle(const QString &title);
     void setInfo(const QString &info);
     void setProgress(int permille);
+    // Numeric speed and amount - Plasma draws the speed graph of the job from them.
+    void setSpeed(qint64 bytesPerSecond, qint64 processedBytes);
     // Hides the progress and ends the job (a non-empty error message marks it as failed).
     void finish(bool cancelled, const QString &errorMessage = QString());
     bool isActive() const { return m_active; }

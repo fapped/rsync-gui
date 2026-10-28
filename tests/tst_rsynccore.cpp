@@ -146,6 +146,11 @@ private slots:
     void planContentsOnly();
     void parseProgress_data();
     void parseProgress();
+    void parseSizeAndRate_data();
+    void parseSizeAndRate();
+    void humanLevel();
+    void processedBytes_data();
+    void processedBytes();
     void parseDifference_data();
     void parseDifference();
     void copyLocal();
@@ -552,6 +557,86 @@ void TestRsyncCore::parseProgress()
     QCOMPARE(info.remaining, remaining);
     QCOMPARE(info.total, total);
     QCOMPARE(info.totalFinal, final);
+}
+
+void TestRsyncCore::parseSizeAndRate_data()
+{
+    // Formats seen in rsync 3.4.1 output (a locale with a decimal comma and the C locale), 6 000 000 bytes at 2 MiB/s.
+    QTest::addColumn<QString>("line");
+    QTest::addColumn<int>("level");
+    QTest::addColumn<qint64>("bytes");
+    QTest::addColumn<qint64>("rate");
+    QTest::addColumn<int>("xfr");
+    const qint64 mib2 = 2 * 1024 * 1024;
+    QTest::newRow("plain, comma") << "      6.000.000 100%    2,00MB/s    0:00:02 (xfr#1, to-chk=0/1)" << 1 << qint64(6000000) << mib2 << 1;
+    QTest::newRow("plain, C") << "      6,000,000 100%    2.00MB/s    0:00:02 (xfr#3, ir-chk=10/20)" << 1 << qint64(6000000) << mib2 << 3;
+    QTest::newRow("-h, units of 1000") << "          4,62M  77%    2,00MB/s    0:00:00" << 2 << qint64(4620000) << mib2 << -1;
+    QTest::newRow("-hh, units of 1024") << "          4,41M  77%    2,00MB/s    0:00:00" << 3 << qint64(4.41 * 1024 * 1024) << mib2 << -1;
+    QTest::newRow("kB/s, C locale") << "         32.77K   1%    0.00kB/s    0:00:00" << 2 << qint64(32770) << qint64(0) << -1;
+    QTest::newRow("GB/s") << "          3,00M  99%    2,76GB/s    0:00:00 (xfr#1, to-chk=3/5)" << 2 << qint64(3000000)
+                          << qint64(2.76 * 1024 * 1024 * 1024) << 1;
+}
+
+void TestRsyncCore::parseSizeAndRate()
+{
+    QFETCH(QString, line);
+    QFETCH(int, level);
+    QFETCH(qint64, bytes);
+    QFETCH(qint64, rate);
+    QFETCH(int, xfr);
+    RsyncJob::ProgressInfo info;
+    QVERIFY(RsyncJob::parseProgressLine(line, &info, level));
+    QCOMPARE(info.bytes, bytes);
+    QCOMPARE(info.bytesPerSecond, rate);
+    QCOMPARE(info.transferNumber, xfr);
+    QCOMPARE(RsyncJob::parseRate(QStringLiteral("???")), qint64(-1));
+}
+
+void TestRsyncCore::humanLevel()
+{
+    QCOMPARE(RsyncJob::humanLevel({"-avP"}), 1);
+    QCOMPARE(RsyncJob::humanLevel({"-avhP"}), 2);
+    QCOMPARE(RsyncJob::humanLevel({"-avhP", "-h"}), 3);
+    QCOMPARE(RsyncJob::humanLevel({"-a", "--human-readable"}), 2);
+    QCOMPARE(RsyncJob::humanLevel({"-a", "--", "-h-named-file"}), 1); // sources are not options
+    QCOMPARE(RsyncJob::humanLevel({"-a", "--exclude=*.h"}), 1);
+}
+
+void TestRsyncCore::processedBytes_data()
+{
+    QTest::addColumn<int>("progress");
+    QTest::addColumn<bool>("human");
+    QTest::newRow("per file") << int(RsyncOptions::Progress::PerFile) << false;
+    QTest::newRow("overall, -h") << int(RsyncOptions::Progress::Overall) << true;
+}
+
+void TestRsyncCore::processedBytes()
+{
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    QFETCH(int, progress);
+    QFETCH(bool, human);
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/a"), QByteArray(300000, 'a'));
+    writeFile(tmp.filePath("src/sub/b"), QByteArray(200000, 'b'));
+    writeFile(tmp.filePath("src/c"), QByteArray(100000, 'c'));
+    const QString dest = tmp.filePath("dest");
+    QVERIFY(QDir().mkpath(dest));
+
+    RsyncOptions options = testOptions();
+    options.progress = RsyncOptions::Progress(progress);
+    options.human = human;
+    RsyncJob job(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+    QSignalSpy rates(&job, &RsyncJob::transferRateChanged);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QVERIFY(!rates.isEmpty());
+    const qint64 processed = rates.last().at(1).toLongLong();
+    // -h rounds to 3 significant digits ("600K").
+    QVERIFY2(qAbs(processed - 600000) <= (human ? 5000 : 0), qPrintable(QString::number(processed)));
+    for (const QList<QVariant> &args : std::as_const(rates))
+        QVERIFY(args.at(0).toLongLong() >= 0);
 }
 
 void TestRsyncCore::parseDifference_data()

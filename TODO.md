@@ -18,7 +18,8 @@
       with the absolute program path
 - [x] Installed to `~/.local`; the older service menu removed
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
-- [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6)
+- [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6),
+      numeric speed and amount for Plasma's speed graph
 - [x] *Move…* Dolphin action and preset (`--remove-source-files` + removing emptied source directories)
 - [x] *Move to FAT/NTFS/NAS (-rlt)…* preset and Dolphin action
 - [x] *Move and verify (-ac)…*: the sources are removed only after a successful verification
@@ -31,11 +32,7 @@
 
 ## To do
 
-- [ ] Speed graph in the Plasma job notification (asked 2026-10-28, for later): Plasma draws it itself
-      when the job sends numeric values - `speed` (bytes/s, qulonglong) and `processedBytes` /
-      `totalBytes` in `org.kde.JobViewV3.update`. Today only the text `infoMessage` is sent: parse the
-      rate of rsync's progress lines (`8,00MB/s`; check whether -h uses 1000 or 1024; locale decimal separator) into
-      bytes/s, and the transferred size from `--info=progress2` (per-file mode has no overall bytes)
+- [ ] Check the speed graph in the Plasma job notification by hand (the values are sent - checked with dbus-monitor)
 - [ ] Check the cancel button of the Plasma job notification by hand
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)

@@ -10,6 +10,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <cmath>
 #include <cerrno>
 #include <cstring>
 #include <functional>
@@ -149,12 +150,12 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
     return result;
 }
 
-bool RsyncJob::parseProgressLine(const QString &line, ProgressInfo *info)
+bool RsyncJob::parseProgressLine(const QString &line, ProgressInfo *info, int humanLevel)
 {
     // "      3,00M  99%    2,76GB/s    0:00:00 (xfr#1, to-chk=3/5)"
     static const QRegularExpression re(QStringLiteral(
         "^\\s*([0-9][0-9.,]*[A-Za-z]?)\\s+([0-9]{1,3})%\\s+(\\S+)\\s+([0-9]+:[0-9]{2}:[0-9]{2})"
-        "(?:\\s+\\((?:xfr#[0-9]+,\\s*)?(to|ir)-chk=([0-9]+)/([0-9]+)\\))?\\s*$"));
+        "(?:\\s+\\((?:xfr#([0-9]+),\\s*)?(to|ir)-chk=([0-9]+)/([0-9]+)\\))?\\s*$"));
     const QRegularExpressionMatch m = re.match(line);
     if (!m.hasMatch())
         return false;
@@ -164,13 +165,84 @@ bool RsyncJob::parseProgressLine(const QString &line, ProgressInfo *info)
         info->percent = qBound(0, m.captured(2).toInt(), 100);
         info->rate = m.captured(3);
         info->eta = m.captured(4);
-        if (m.hasCaptured(5)) {
-            info->totalFinal = m.captured(5) == QStringLiteral("to");
-            info->remaining = m.captured(6).toInt();
-            info->total = m.captured(7).toInt();
+        if (m.hasCaptured(5))
+            info->transferNumber = m.captured(5).toInt();
+        if (m.hasCaptured(6)) {
+            info->totalFinal = m.captured(6) == QStringLiteral("to");
+            info->remaining = m.captured(7).toInt();
+            info->total = m.captured(8).toInt();
         }
+        info->bytes = parseSize(info->transferred, humanLevel);
+        info->bytesPerSecond = parseRate(info->rate);
     }
     return true;
+}
+
+namespace {
+
+// "4,62" or "4.62" (the decimal separator follows the locale of rsync).
+double parseDecimal(QString number)
+{
+    number.replace(QLatin1Char(','), QLatin1Char('.'));
+    bool ok = false;
+    const double value = number.toDouble(&ok);
+    return ok ? value : -1;
+}
+
+int unitPower(QChar unit)
+{
+    static const QString units = QStringLiteral("KMGTPE");
+    return units.indexOf(unit.toUpper()) + 1; // 0 if it is not a unit
+}
+
+} // namespace
+
+qint64 RsyncJob::parseSize(const QString &text, int humanLevel)
+{
+    if (text.isEmpty())
+        return -1;
+    const int power = unitPower(text.back());
+    if (power == 0) {
+        // Plain number with thousands separators (which also follow the locale): only the digits count.
+        QString digits;
+        for (const QChar c : text) {
+            if (c.isDigit())
+                digits += c;
+        }
+        bool ok = false;
+        const qint64 value = digits.toLongLong(&ok);
+        return ok ? value : -1;
+    }
+    const double value = parseDecimal(text.chopped(1));
+    if (value < 0)
+        return -1;
+    const double base = humanLevel >= 3 ? 1024.0 : 1000.0;
+    return qint64(value * std::pow(base, power));
+}
+
+qint64 RsyncJob::parseRate(const QString &text)
+{
+    // "2,00MB/s", "0,00kB/s": always units of 1024, whatever the -h level.
+    static const QRegularExpression re(QStringLiteral("^([0-9]+(?:[.,][0-9]+)?)([kKMGTPE])B/s$"));
+    const QRegularExpressionMatch m = re.match(text);
+    if (!m.hasMatch())
+        return -1;
+    const double value = parseDecimal(m.captured(1));
+    return value < 0 ? -1 : qint64(value * std::pow(1024.0, unitPower(m.captured(2).at(0))));
+}
+
+int RsyncJob::humanLevel(const QStringList &args)
+{
+    int level = 1;
+    for (const QString &arg : args) {
+        if (arg == QStringLiteral("--"))
+            break;
+        if (arg == QStringLiteral("--human-readable"))
+            ++level;
+        else if (arg.startsWith(QLatin1Char('-')) && !arg.startsWith(QStringLiteral("--")))
+            level += int(arg.count(QLatin1Char('h')));
+    }
+    return level;
 }
 
 bool RsyncJob::parseDifferenceLine(const QString &line, QString *name)
@@ -235,6 +307,7 @@ void RsyncJob::start()
     m_running = true;
     m_index = 0;
     m_phase = Phase::Copy;
+    m_bytesBefore = 0;
     m_summary = {};
     m_differingFiles.clear();
     m_cancelRequested = false;
@@ -300,6 +373,10 @@ void RsyncJob::startProcess()
     m_pending.clear();
     m_lastDone = 0;
     m_lastTotal = 0;
+    m_humanLevel = humanLevel(args);
+    m_completedBytes = 0;
+    m_processedBytes = 0;
+    m_lastTransferNumber = 0; // (the bytes of a finished copy are already in m_bytesBefore)
     m_transferDifferences = 0;
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -358,7 +435,21 @@ void RsyncJob::handleLine(const QString &rawLine)
         return;
 
     ProgressInfo info;
-    if (parseProgressLine(line, &info)) {
+    if (parseProgressLine(line, &info, m_humanLevel)) {
+        if (m_phase == Phase::Copy && info.bytes >= 0) {
+            if (m_options.progress == RsyncOptions::Progress::Overall) {
+                m_processedBytes = info.bytes; // the whole transfer so far
+            } else if (info.transferNumber > m_lastTransferNumber) {
+                // The last line of a file (repeated for following entries with the same number).
+                m_lastTransferNumber = info.transferNumber;
+                m_completedBytes += info.bytes;
+                m_processedBytes = m_completedBytes;
+            } else if (info.transferNumber < 0) {
+                m_processedBytes = m_completedBytes + info.bytes; // the current file
+            }
+            if (info.bytesPerSecond >= 0)
+                emit transferRateChanged(info.bytesPerSecond, m_bytesBefore + m_processedBytes);
+        }
         double fraction = 0.0;
         if (info.total > 0) {
             m_lastTotal = info.total;
@@ -427,6 +518,8 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         : tr("exit code %1: %2").arg(exitCode).arg(exitCodeDescription(exitCode));
 
     if (m_phase == Phase::Copy) {
+        m_bytesBefore += m_processedBytes;
+        m_processedBytes = 0;
         bool runVerify = false;
         if (m_cancelRequested) {
             ++m_summary.transfersFailed;

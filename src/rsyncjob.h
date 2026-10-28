@@ -49,6 +49,9 @@ public:
         int remaining = -1;  // files left to check, -1 if not reported in this line
         int total = -1;
         bool totalFinal = false; // "to-chk" (final) rather than "ir-chk" (the file list still grows)
+        int transferNumber = -1; // "xfr#N": set on the last line of a transferred file
+        qint64 bytes = -1;       // `transferred` in bytes (-1 if it cannot be parsed)
+        qint64 bytesPerSecond = -1; // `rate` in bytes per second
     };
 
     struct Summary
@@ -74,7 +77,13 @@ public:
 
     static Plan plan(const QList<Location> &sources, const Location &destination, const RsyncOptions &options);
     // Parses an rsync --progress / --info=progress2 line.
-    static bool parseProgressLine(const QString &line, ProgressInfo *info);
+    // `humanLevel` is the number of -h options + 1, as in rsync: 1 = plain numbers with thousands
+    // separators, 2 = units of 1000 ("4,62M"), 3 = units of 1024. The rate is always in units of 1024.
+    static bool parseProgressLine(const QString &line, ProgressInfo *info, int humanLevel = 1);
+    static qint64 parseSize(const QString &text, int humanLevel);
+    static qint64 parseRate(const QString &text);
+    // The -h level of an rsync command line (see parseProgressLine()).
+    static int humanLevel(const QStringList &args);
     // Returns true if the line (from the verification pass, "--out-format=%i %n%L") reports an entry
     // that differs or is missing in the destination; `name` receives the entry name.
     static bool parseDifferenceLine(const QString &line, QString *name = nullptr);
@@ -102,6 +111,8 @@ signals:
     void progress(int permille);
     void statusChanged(const QString &text); // speed, ETA etc. of the running transfer
     void currentFileChanged(const QString &path);
+    // Speed and the bytes copied so far (all transfers of the job), from rsync's progress output.
+    void transferRateChanged(qint64 bytesPerSecond, qint64 processedBytes);
     void phaseChanged(const QString &text);
     void finished();
 
@@ -129,6 +140,11 @@ private:
     Phase m_phase = Phase::Copy;
     int m_stepsPerTransfer = 1;
     int m_transferDifferences = 0;
+    int m_humanLevel = 1;
+    qint64 m_bytesBefore = 0;    // bytes of the previous transfers of the job
+    qint64 m_completedBytes = 0; // per-file progress: bytes of the files finished in this transfer
+    qint64 m_processedBytes = 0; // this transfer
+    int m_lastTransferNumber = 0;
     int m_lastDone = 0;  // files checked so far, from the last "to-chk" report
     int m_lastTotal = 0;
     bool m_running = false;

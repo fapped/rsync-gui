@@ -132,6 +132,16 @@ void DesktopProgress::setProgress(int permille)
     scheduleUpdate();
 }
 
+void DesktopProgress::setSpeed(qint64 bytesPerSecond, qint64 processedBytes)
+{
+    if (!m_active)
+        return;
+    m_pending.insert(QStringLiteral("speed"), qulonglong(qMax<qint64>(0, bytesPerSecond)));
+    if (processedBytes >= 0)
+        m_pending.insert(QStringLiteral("processedBytes"), qulonglong(processedBytes));
+    scheduleUpdate();
+}
+
 void DesktopProgress::finish(bool cancelled, const QString &errorMessage)
 {
     if (!m_active)
