@@ -1,0 +1,31 @@
+{
+    "format": "rsync-gui-settings",
+    "version": 1,
+    "name": "Move to FAT/NTFS/NAS",
+    "options": {
+        "archive": false,
+        "recursive": true,
+        "links": true,
+        "perms": false,
+        "times": true,
+        "group": false,
+        "owner": false,
+        "devices": false,
+        "hardLinks": false,
+        "acls": false,
+        "xattrs": false,
+        "verbose": true,
+        "human": true,
+        "partial": true,
+        "progress": "per-file",
+        "checksum": false,
+        "existing": "replace",
+        "compress": false,
+        "contentsOnly": false,
+        "deleteExtraneous": false,
+        "removeSourceFiles": true,
+        "removeSourceDirs": true,
+        "dryRun": false,
+        "verifyAfter": false
+    }
+}

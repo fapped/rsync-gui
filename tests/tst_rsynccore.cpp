@@ -1078,6 +1078,8 @@ void TestRsyncCore::shippedPresets_data()
     QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} << true;
     QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} << false;
     QTest::newRow("rsync-move") << "rsync-move" << QStringList{"-avhP", "--remove-source-files"} << false;
+    QTest::newRow("rsync-move-portable") << "rsync-move-portable" << QStringList{"-rltvhP", "--remove-source-files"}
+                                         << false;
 }
 
 void TestRsyncCore::shippedPresets()
