@@ -506,10 +506,7 @@ QList<RsyncPreset> RsyncOptions::presets(const QStringList &searchPaths)
         preset.label = preset.error.isEmpty() ? preset.options.label(preset.name) : preset.name;
         list << preset;
     }
-    std::sort(list.begin(), list.end(), [](const RsyncPreset &a, const RsyncPreset &b) {
-        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
-    });
-    return list;
+    return list; // availablePresets() is ordered by the file names
 }
 
 bool RsyncOptions::isValidBwLimit(const QString &limit)

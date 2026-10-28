@@ -6,7 +6,7 @@ X-KDE-Protocols=file,sftp
 X-KDE-Submenu=Rsync
 X-KDE-Priority=TopLevel
 Icon=folder-sync
-Actions=rsyncCopy;rsyncCopyVerify;rsyncCopyPortable;rsyncMove;rsyncMoveVerify;rsyncMovePortable;
+Actions=rsyncCopy;rsyncCopyPortable;rsyncCopyVerify;rsyncMove;rsyncMovePortable;rsyncMoveVerify;
 
 [Desktop Action rsyncCopy]
 Name=Copy (-a)…

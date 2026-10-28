@@ -103,7 +103,8 @@ struct RsyncOptions
     // Returns the file of the given preset or an empty string. A name containing '/' is treated as a path.
     static QString locatePreset(const QString &name, const QStringList &searchPaths = presetSearchPaths());
     static QMap<QString, QString> availablePresets(const QStringList &searchPaths = presetSearchPaths());
-    // Available presets sorted by name - the order of the Dolphin menu.
+    // Available presets sorted by file name (id). Dolphin sorts the actions of a submenu by their ids
+    // (not by Actions=), and the service menu uses action ids in the same order as the preset ids.
     static QList<RsyncPreset> presets(const QStringList &searchPaths = presetSearchPaths());
 
     static bool isValidBwLimit(const QString &limit);

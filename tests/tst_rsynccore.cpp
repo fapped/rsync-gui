@@ -1219,13 +1219,11 @@ void TestRsyncCore::presetNamesMatchDolphinMenu()
     for (const RsyncPreset &preset : presets) {
         QVERIFY2(preset.error.isEmpty(), qPrintable(preset.error));
         QVERIFY2(preset.name != preset.id, qPrintable(preset.id)); // every shipped preset has a name
-        names << preset.name;
+        names << preset.id;
     }
     QStringList sorted = names;
-    std::sort(sorted.begin(), sorted.end(), [](const QString &a, const QString &b) {
-        return a.compare(b, Qt::CaseInsensitive) < 0;
-    });
-    QCOMPARE(names, sorted);
+    std::sort(sorted.begin(), sorted.end());
+    QCOMPARE(names, sorted); // File > Load preset: by file name
 
     // Every Dolphin action is "<preset label>…" and runs that preset; every preset has an action,
     // listed in the same order as in File > Load preset.
@@ -1239,7 +1237,12 @@ void TestRsyncCore::presetNamesMatchDolphinMenu()
         else if (const qsizetype eq = line.indexOf(QLatin1Char('=')); eq > 0)
             entries.insert(group + QLatin1Char('/') + line.left(eq), line.mid(eq + 1));
     }
-    const QStringList actions = entries.value(QStringLiteral("Desktop Entry/Actions")).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    QStringList actions = entries.value(QStringLiteral("Desktop Entry/Actions")).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    // Dolphin shows the actions of a submenu sorted by their ids, whatever the order in Actions=.
+    QStringList shown = actions;
+    std::sort(shown.begin(), shown.end());
+    QCOMPARE(actions, shown); // keep the file readable in the order the menu shows
+    actions = shown;
     QCOMPARE(actions.size(), presets.size());
     for (qsizetype i = 0; i < actions.size(); ++i) {
         const QString prefix = QStringLiteral("Desktop Action ") + actions.at(i) + QLatin1Char('/');

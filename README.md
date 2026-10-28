@@ -109,8 +109,9 @@ Installed into `<prefix>/share/rsync-gui/presets/`:
 | Move to FAT/NTFS/NAS (-rlt) | `rsync-move-portable` | `rsync -rltvhP --remove-source-files` + removing emptied directories | the same for drives and shares without Unix permissions and owners |
 
 The label — the name (the `name` field of the file) followed by the flags that decide what is
-copied — is shown in *File → Load preset* (sorted by name, the full command and the file in the
-tooltip), in the title of the options section and, with "…", in the Dolphin menu, in the same order.
+copied — is shown in *File → Load preset* (the full command and the file in the tooltip), in the
+title of the options section and, with "…", in the Dolphin menu. Both menus list the presets in the
+order of their file names (Dolphin sorts the actions of a submenu by their ids).
 The flags are generated from the options (`-a` or its parts, `-H -A -X -c -u -z`, `--ignore-existing`,
 `--delete`); output flags (`-v -h -P`) and the removal of sources (the name says *Move*) are left out.
 Your own presets get the flags too. `--preset` uses the file names; `--list-presets` prints the file
