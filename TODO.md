@@ -40,6 +40,8 @@
 
 ## To do
 
+- [ ] Later: the speed graph also in the application window, not only in the Plasma notification
+      (e.g. a live speed graph in place of the progress bar, with the progress shown over it)
 - [ ] Later: unknown ssh host keys - the tests show that ssh asks the question through `SSH_ASKPASS`
       (Plasma sets ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`); check by hand that ksshaskpass shows it,
       otherwise a dialog of our own (fingerprint from `ssh-keyscan`)
