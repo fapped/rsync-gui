@@ -1050,6 +1050,10 @@ void MainWindow::showAbout()
     QMessageBox::about(this, tr("About Rsync GUI"),
                        tr("<b>Rsync GUI</b> %1<br><br>"
                           "A graphical front-end for copying files with <code>rsync</code>.<br><br>"
+                          "<b>Created with AI:</b> the code, tests and documentation were written by "
+                          "Claude (Anthropic) in Claude Code, following the author's requirements, and "
+                          "checked with automated tests and by hand. Review the code before relying on it, "
+                          "especially for moving files.<br><br>"
                           "Licensed under the MIT License.")
                            .arg(QApplication::applicationVersion()));
 }
