@@ -31,6 +31,11 @@
 
 ## To do
 
+- [ ] Speed graph in the Plasma job notification (asked 2026-10-28, for later): Plasma draws it itself
+      when the job sends numeric values - `speed` (bytes/s, qulonglong) and `processedBytes` /
+      `totalBytes` in `org.kde.JobViewV3.update`. Today only the text `infoMessage` is sent: parse the
+      rate of rsync's progress lines (`8,00MB/s`; check whether -h uses 1000 or 1024; locale decimal separator) into
+      bytes/s, and the transferred size from `--info=progress2` (per-file mode has no overall bytes)
 - [ ] Check the cancel button of the Plasma job notification by hand
 - [ ] Test remote sources/destinations against a real ssh host (only parsing and command building are tested)
 - [ ] Optionally start the copy right after choosing the destination from Dolphin (`--start`)
