@@ -93,16 +93,20 @@ The Dolphin menu can be skipped with `cmake -S . -B build -DRSYNC_GUI_INSTALL_SE
 
 Installed into `<prefix>/share/rsync-gui/presets/`:
 
-| Name (menus) | Preset (`--preset`) | Command | Effect |
+| Label (menus) | Preset (`--preset`) | Command | Effect |
 |---|---|---|---|
-| Copy | `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
-| Copy and verify | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
-| Copy to FAT/NTFS/NAS | `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
-| Move | `rsync-move` | `rsync -avhP --remove-source-files` + removing emptied directories | moves files and directories (asks for confirmation) |
+| Copy (-a) | `rsync-copy` | `rsync -avhP` | archive mode, file list, progress, partial files kept |
+| Copy and verify (-ac) | `rsync-copy-verify` | `rsync -avhPc` + verification | as above, files compared by checksum, then a verification pass |
+| Copy to FAT/NTFS/NAS (-rlt) | `rsync-copy-portable` | `rsync -rltvhP` | recursive, symlinks and times only — for FAT/exFAT/NTFS drives or a NAS without Unix permissions and owners |
+| Move (-a) | `rsync-move` | `rsync -avhP --remove-source-files` + removing emptied directories | moves files and directories (asks for confirmation) |
 
-The name (the `name` field of the file) is shown in *File → Load preset* (sorted by name, the command
-and the file in the tooltip), in the title of the options section and — with "…" — in the Dolphin
-menu, in the same order. `--preset` and `--list-presets` use the file names.
+The label — the name (the `name` field of the file) followed by the flags that decide what is
+copied — is shown in *File → Load preset* (sorted by name, the full command and the file in the
+tooltip), in the title of the options section and, with "…", in the Dolphin menu, in the same order.
+The flags are generated from the options (`-a` or its parts, `-H -A -X -c -u -z`, `--ignore-existing`,
+`--delete`); output flags (`-v -h -P`) and the removal of sources (the name says *Move*) are left out.
+Your own presets get the flags too. `--preset` uses the file names; `--list-presets` prints the file
+name, the label and the path.
 
 Presets set the copy options but not the program, the remote shell, the bandwidth limit or the
 additional arguments — those stay as chosen by the user. They are searched for in this order:
@@ -115,10 +119,10 @@ you can also add your own presets (any `*.json` name, format as below).
 
 After installation Dolphin shows an **Rsync** submenu for files and directories:
 
-- **Copy…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
-- **Copy and verify…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
-- **Copy to FAT/NTFS/NAS…** — `--preset rsync-copy-portable` (`rsync -rltvhP`),
-- **Move…** — `--preset rsync-move` (`rsync -avhP --remove-source-files`, then the emptied source
+- **Copy (-a)…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
+- **Copy and verify (-ac)…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
+- **Copy to FAT/NTFS/NAS (-rlt)…** — `--preset rsync-copy-portable` (`rsync -rltvhP`),
+- **Move (-a)…** — `--preset rsync-move` (`rsync -avhP --remove-source-files`, then the emptied source
   directories are removed; a confirmation is shown before it starts).
 
 Clicking an entry opens Rsync GUI with the selected items as sources and the preset loaded, and

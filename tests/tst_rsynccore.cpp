@@ -174,6 +174,8 @@ private slots:
     void shippedPresets_data();
     void shippedPresets();
     void presetNamesMatchDolphinMenu();
+    void summaryFlags_data();
+    void summaryFlags();
 };
 
 void TestRsyncCore::initTestCase()
@@ -1107,6 +1109,48 @@ void TestRsyncCore::shippedPresets()
     QCOMPARE(o.canVerify(), verify);
 }
 
+void TestRsyncCore::summaryFlags_data()
+{
+    QTest::addColumn<QString>("change");
+    QTest::addColumn<QString>("flags");
+    QTest::newRow("default") << "" << "-a";
+    QTest::newRow("checksum") << "checksum" << "-ac";
+    QTest::newRow("rlt") << "rlt" << "-rlt";
+    QTest::newRow("move") << "move" << "-a";             // "Move" in the name says it
+    QTest::newRow("output only") << "output" << "-a";    // -v -h -P -n do not count
+    QTest::newRow("preserve, update") << "preserve" << "-aHAXuz";
+    QTest::newRow("delete, ignore") << "delete" << "-a --ignore-existing --delete";
+    QTest::newRow("nothing") << "nothing" << "";
+}
+
+void TestRsyncCore::summaryFlags()
+{
+    QFETCH(QString, change);
+    QFETCH(QString, flags);
+    RsyncOptions o;
+    if (change == "checksum") {
+        o.checksum = true;
+    } else if (change == "rlt") {
+        o.archive = false;
+        o.perms = o.group = o.owner = o.devices = false;
+    } else if (change == "move") {
+        o.removeSourceFiles = o.removeSourceDirs = true;
+    } else if (change == "output") {
+        o.dryRun = true;
+        o.progress = RsyncOptions::Progress::Overall;
+    } else if (change == "preserve") {
+        o.hardLinks = o.acls = o.xattrs = o.compress = true;
+        o.existing = RsyncOptions::Existing::SkipNewer;
+    } else if (change == "delete") {
+        o.existing = RsyncOptions::Existing::IgnoreExisting;
+        o.deleteExtraneous = true;
+    } else if (change == "nothing") {
+        o.archive = o.recursive = o.links = o.perms = o.times = o.group = o.owner = o.devices = false;
+    }
+    QCOMPARE(o.summaryFlags(), flags);
+    QCOMPARE(o.label("Name"), flags.isEmpty() ? QStringLiteral("Name") : "Name (" + flags + ")");
+}
+
 void TestRsyncCore::presetNamesMatchDolphinMenu()
 {
     const QList<RsyncPreset> presets = RsyncOptions::presets({QStringLiteral(RSYNC_GUI_SOURCE_PRESETS_DIR)});
@@ -1123,7 +1167,7 @@ void TestRsyncCore::presetNamesMatchDolphinMenu()
     });
     QCOMPARE(names, sorted);
 
-    // Every Dolphin action is "<preset name>…" and runs that preset; every preset has an action,
+    // Every Dolphin action is "<preset label>…" and runs that preset; every preset has an action,
     // listed in the same order as in File > Load preset.
     // (QSettings cannot read .desktop files: ';' starts a comment there.)
     QHash<QString, QString> entries; // "group/key" -> value
@@ -1141,7 +1185,7 @@ void TestRsyncCore::presetNamesMatchDolphinMenu()
         const QString prefix = QStringLiteral("Desktop Action ") + actions.at(i) + QLatin1Char('/');
         const QString label = entries.value(prefix + QStringLiteral("Name"));
         const QString exec = entries.value(prefix + QStringLiteral("Exec"));
-        QCOMPARE(label, presets.at(i).name + QStringLiteral("…"));
+        QCOMPARE(label, presets.at(i).label + QStringLiteral("…"));
         QVERIFY2(exec.contains(QStringLiteral("--preset ") + presets.at(i).id + QLatin1Char(' ')), qPrintable(exec));
     }
 }

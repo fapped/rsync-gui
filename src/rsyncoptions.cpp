@@ -217,6 +217,45 @@ QStringList RsyncOptions::verifyArguments(int port) const
         << remoteShellArguments(port) << extraArgumentList();
 }
 
+QString RsyncOptions::summaryFlags() const
+{
+    QString flags;
+    if (archive) {
+        flags += QLatin1Char('a');
+    } else {
+        const std::pair<bool, char> implied[] = {
+            {recursive, 'r'}, {links, 'l'}, {perms, 'p'}, {times, 't'},
+            {group, 'g'},     {owner, 'o'}, {devices, 'D'},
+        };
+        for (const auto &[enabled, flag] : implied) {
+            if (enabled)
+                flags += QLatin1Char(flag);
+        }
+    }
+    const std::pair<bool, char> others[] = {
+        {hardLinks, 'H'}, {acls, 'A'}, {xattrs, 'X'}, {checksum, 'c'},
+        {existing == Existing::SkipNewer, 'u'}, {compress, 'z'},
+    };
+    for (const auto &[enabled, flag] : others) {
+        if (enabled)
+            flags += QLatin1Char(flag);
+    }
+    QStringList parts;
+    if (!flags.isEmpty())
+        parts << QLatin1Char('-') + flags;
+    if (existing == Existing::IgnoreExisting)
+        parts << QStringLiteral("--ignore-existing");
+    if (deleteExtraneous)
+        parts << QStringLiteral("--delete");
+    return parts.join(QLatin1Char(' '));
+}
+
+QString RsyncOptions::label(const QString &name) const
+{
+    const QString flags = summaryFlags();
+    return flags.isEmpty() ? name : QStringLiteral("%1 (%2)").arg(name, flags);
+}
+
 QStringList RsyncOptions::remoteShellArguments(int port) const
 {
     QString shell = useRemoteShell ? remoteShell.trimmed() : QString();
@@ -454,6 +493,7 @@ QList<RsyncPreset> RsyncOptions::presets(const QStringList &searchPaths)
         preset.options = loadFromFile(preset.file, &preset.error, RsyncOptions(), &preset.name);
         if (preset.name.isEmpty())
             preset.name = preset.id;
+        preset.label = preset.error.isEmpty() ? preset.options.label(preset.name) : preset.name;
         list << preset;
     }
     std::sort(list.begin(), list.end(), [](const RsyncPreset &a, const RsyncPreset &b) {

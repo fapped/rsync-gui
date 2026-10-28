@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     if (parser.isSet(listPresetsOption)) {
         const QList<RsyncPreset> presets = RsyncOptions::presets();
         for (const RsyncPreset &preset : presets)
-            std::printf("%s\t%s\t%s\n", qPrintable(preset.id), qPrintable(preset.name), qPrintable(preset.file));
+            std::printf("%s\t%s\t%s\n", qPrintable(preset.id), qPrintable(preset.label), qPrintable(preset.file));
         if (presets.isEmpty()) {
             std::fprintf(stderr, "No presets found. Searched in:\n%s\n",
                          qPrintable(RsyncOptions::presetSearchPaths().join(QLatin1Char('\n'))));

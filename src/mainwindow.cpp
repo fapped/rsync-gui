@@ -462,7 +462,7 @@ void MainWindow::populatePresetMenu()
     m_presetMenu->setToolTipsVisible(true);
     for (const RsyncPreset &preset : presets) {
         const QString file = preset.file;
-        QAction *action = m_presetMenu->addAction(preset.name, this, [this, file] {
+        QAction *action = m_presetMenu->addAction(preset.label, this, [this, file] {
             importSettingsFile(file, Persistence::SessionOnly);
         });
         if (preset.error.isEmpty()) {
@@ -987,7 +987,7 @@ bool MainWindow::importSettingsFile(const QString &path, Persistence persistence
     } else {
         // Session only: the remembered options stay untouched until settings are imported explicitly.
         m_rememberOptions = false;
-        setOptionsSource(tr("%1 (session only, not remembered)").arg(name));
+        setOptionsSource(tr("%1 - session only, not remembered").arg(options.label(name)));
         appendLog(RsyncJob::LogLevel::Info, tr("Loaded \"%1\" from %2 (session only)").arg(name, path));
     }
     // The validation message (e.g. a program missing on this machine) takes precedence in the status bar.

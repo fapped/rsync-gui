@@ -64,6 +64,11 @@ struct RsyncOptions
     // differs (--checksum --itemize-changes), without changing anything.
     QStringList verifyArguments(int port = 0) const;
     QStringList remoteShellArguments(int port) const;
+    // The flags that decide what is copied, for preset labels: "-a", "-ac", "-rlt", "-a --delete".
+    // Output and progress flags (-v -h -P), -n and the removal of sources (a move) are left out.
+    QString summaryFlags() const;
+    // "<name> (<summary flags>)" - how presets and settings files are shown.
+    QString label(const QString &name) const;
     QStringList extraArgumentList() const;
 
     // Whether the verification pass is meaningful for these options.
@@ -109,7 +114,8 @@ struct RsyncPreset
 {
     QString id;    // the file name without .json, used by --preset
     QString file;
-    QString name;  // the "name" from the file (also the Dolphin menu label), else the id
+    QString name;  // the "name" from the file, else the id
+    QString label; // the name with the summary flags, e.g. "Copy (-a)" (the Dolphin label adds "…")
     QString error; // non-empty if the file cannot be loaded
     RsyncOptions options; // the preset applied to the default options
 };
