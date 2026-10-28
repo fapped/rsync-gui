@@ -191,6 +191,9 @@ read back from the disk itself.
 Remembering the options between runs works independently (`~/.config/fapped/rsync-gui.conf`).
 In addition, the current options can be exported to a JSON file and imported later. Options imported
 with *Import settings…* become the new remembered options (unlike presets and `--config`).
+The last 10 imported, exported or `--config` files are listed in *File → Recent settings* (with
+their `name`); choosing one works like *Import settings…*. Files that no longer exist disappear from
+the list, presets are not listed there (they have *Load preset*).
 
 ```json
 {

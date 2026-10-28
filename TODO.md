@@ -20,6 +20,7 @@
 - [x] Dolphin menu checked on the live system by the user (2026-10-28)
 - [x] Progress in the Plasma task manager and as a job in the notification area (D-Bus, no KF6)
 - [x] *Move…* Dolphin action and preset (`--remove-source-files` + removing emptied source directories)
+- [x] Recently used settings files (*File → Recent settings*)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
 
@@ -31,7 +32,6 @@
 - [ ] Ask for unknown ssh host keys in the GUI (ssh has no terminal; passwords work via `SSH_ASKPASS` only)
 - [ ] Verification that bypasses the page cache (e.g. drop caches for the destination, or `--checksum` with `O_DIRECT`)
 - [ ] `--modify-window=1` as a checkbox (or automatically for FAT destinations, detected with `QStorageInfo`)
-- [ ] Recently used settings files (*File → Recent settings*)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File names that are not valid UTF-8 (the `QString` ↔ bytes conversion may change them)

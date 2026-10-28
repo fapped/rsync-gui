@@ -51,6 +51,9 @@ private:
     void buildUi();
     void buildMenus();
     void populatePresetMenu();
+    void populateRecentSettingsMenu();
+    // Adds a settings file to File > Recent settings (presets are not added).
+    void rememberRecentSettingsFile(const QString &file);
     void loadSettings();
     void saveSettings() const;
     void setOptionsSource(const QString &description);
@@ -136,6 +139,7 @@ private:
     QAction *m_importAction = nullptr;
     QAction *m_exportAction = nullptr;
     QMenu *m_presetMenu = nullptr;
+    QMenu *m_recentSettingsMenu = nullptr;
 
     QLineEdit *m_previewEdit = nullptr;
     QPushButton *m_startButton = nullptr;
