@@ -226,7 +226,7 @@ While a transfer runs, its progress is also shown
   in the background before the copy (rsync does not report it), so with a remote source there is no
   graph. Files that are already up to date in the destination count in the total but are not copied,
   so the graph may end before the right edge. When the job ends, the notification shows a summary
-  ("24,0 GiB in 0:00:57", "Cancelled after …" or the error).
+  ("12.01 GiB in 0:00:25", "Cancelled after …" or the error).
 
 On other desktops or without a session bus this does nothing.
 
