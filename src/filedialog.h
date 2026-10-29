@@ -38,7 +38,8 @@ class BuiltInFileDialog : public QDialog
     Q_OBJECT
 
 public:
-    enum Mode { Files, Directory };
+    // FilesAndDirectories: like Files, but directories can be chosen too (Open does not go into them).
+    enum Mode { Files, Directory, FilesAndDirectories };
     // Returned by exec() when the user asked for the system dialog instead.
     static constexpr int UseSystemDialog = 2;
 
@@ -50,12 +51,17 @@ public:
     // LocalPath strings: the chosen files, or the chosen directory.
     QStringList selectedPaths() const;
     void selectNames(const QStringList &names);
+    // Lists only these names of the current directory (until another one is opened).
+    void showOnly(const QStringList &names);
+    // A message above the buttons (rich text), shown unless there is an error.
+    void setNote(const QString &note);
 
 private:
     void openIndex(const QModelIndex &index);
     void acceptSelection();
     void updateSelection();
     void fillPlaces();
+    void reload(); // the current directory again, keeping the history
     QString childPath(const QString &name) const;
 
     Mode m_mode;
@@ -63,6 +69,7 @@ private:
     QStringList m_history;
     int m_nonUtf8 = 0;
     QString m_error;
+    QString m_note;
     EntryModel *m_model;
     EntrySortModel *m_sortModel;
     QTreeView *m_view;

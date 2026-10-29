@@ -19,6 +19,16 @@ int escapedByte(QChar c)
     return uchar(LocalPath::encode(single).at(0));
 }
 
+// A name with U+FFFD in it, as a pattern: each U+FFFD stands for one or more escaped bytes.
+QRegularExpression replacedBytesPattern(const QString &name)
+{
+    const QStringList parts = name.split(QChar::ReplacementCharacter);
+    QString pattern = QRegularExpression::escape(parts.first());
+    for (qsizetype i = 1; i < parts.size(); ++i)
+        pattern += QStringLiteral("(?:[\\x{F780}-\\x{F7FF}]+|\\x{FFFD})") + QRegularExpression::escape(parts.at(i));
+    return QRegularExpression(QRegularExpression::anchoredPattern(pattern));
+}
+
 } // namespace
 
 namespace FileListing {
@@ -97,6 +107,38 @@ QString latin1Reading(const QString &name)
         result += byte >= 0 ? QChar(char16_t(byte)) : c;
     }
     return result;
+}
+
+QStringList replacedBytesMatches(const QString &path, int limit)
+{
+    if (!path.startsWith(QLatin1Char('/')) || !path.contains(QChar::ReplacementCharacter))
+        return {};
+    const QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList candidates{QString()}; // the paths so far, without the trailing slash
+    for (qsizetype i = 0; i < parts.size() && !candidates.isEmpty(); ++i) {
+        const QString &part = parts.at(i);
+        const bool last = i == parts.size() - 1;
+        QStringList next;
+        for (const QString &base : std::as_const(candidates)) {
+            if (!part.contains(QChar::ReplacementCharacter)) {
+                next << base + QLatin1Char('/') + part;
+                continue;
+            }
+            const QRegularExpression pattern = replacedBytesPattern(part);
+            for (const Entry &entry : list(base.isEmpty() ? QStringLiteral("/") : base)) {
+                if ((last || entry.isDir) && pattern.match(entry.name).hasMatch() && next.size() < limit)
+                    next << base + QLatin1Char('/') + entry.name;
+            }
+        }
+        candidates = next;
+    }
+    QStringList matches;
+    for (const QString &candidate : std::as_const(candidates)) {
+        if (LocalPath::info(candidate).exists)
+            matches << candidate;
+    }
+    matches.sort();
+    return matches;
 }
 
 QStringList mountPoints(const QByteArray &mounts)

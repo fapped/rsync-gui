@@ -407,8 +407,11 @@ button opens the system dialog for one time.
 
 Dolphin converts such names too (KIO replaces the bytes): what it passes from the context menu,
 drag & drop and *Copy* holds `�` (U+FFFD) instead, e.g. `caf%EF%BF%BD.jpg` for both `caf\xe9.jpg` and
-`caf\xe8.jpg` — a name that does not exist. Choose such files in the built-in dialog. A directory with
-a plain name can be added from Dolphin as usual, whatever names it contains.
+`caf\xe8.jpg` — a name that does not exist. Rsync GUI looks for such a path in its directory, where each
+`�` stands for one or more of those bytes: when one name matches, it is added with its exact bytes; when
+several match (here `caf\xe9.jpg` and `caf\xe8.jpg`), the built-in dialog lists only them, nothing chosen
+in advance, and shows how each would read as Latin-1, so that the right ones can be chosen. A directory
+with a plain name can be added from Dolphin as usual, whatever names it contains.
 
 ## AI disclosure
 

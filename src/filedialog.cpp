@@ -61,6 +61,7 @@ public:
 
     bool dirsOnly = false;
     bool showHidden = false;
+    QStringList onlyNames; // when not empty, only these names are listed
 
     // Returns errno of reading the directory (0 on success).
     int load(const QString &dir)
@@ -69,7 +70,9 @@ public:
         int error = 0;
         m_entries.clear();
         for (const FileListing::Entry &entry : FileListing::list(dir, &error)) {
-            if ((dirsOnly && !entry.isDir) || (!showHidden && entry.name.startsWith(QLatin1Char('.'))))
+            const bool hidden = onlyNames.isEmpty() ? !showHidden && entry.name.startsWith(QLatin1Char('.'))
+                                                    : !onlyNames.contains(entry.name);
+            if ((dirsOnly && !entry.isDir) || hidden)
                 continue;
             m_entries << entry;
         }
@@ -349,7 +352,7 @@ BuiltInFileDialog::BuiltInFileDialog(Mode mode, const QString &title, const QStr
     m_view->setUniformRowHeights(true);
     m_view->setSortingEnabled(true);
     m_view->sortByColumn(0, Qt::AscendingOrder);
-    m_view->setSelectionMode(mode == Files ? QAbstractItemView::ExtendedSelection : QAbstractItemView::SingleSelection);
+    m_view->setSelectionMode(mode == Directory ? QAbstractItemView::SingleSelection : QAbstractItemView::ExtendedSelection);
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setItemDelegate(new NameDelegate(m_view));
     m_view->header()->setStretchLastSection(false);
@@ -366,7 +369,7 @@ BuiltInFileDialog::BuiltInFileDialog(Mode mode, const QString &title, const QStr
     m_nameEdit = new QLineEdit(this);
     m_nameEdit->setReadOnly(true);
     auto *nameRow = new QHBoxLayout;
-    nameRow->addWidget(new QLabel(mode == Files ? tr("Name:") : tr("Directory:"), this));
+    nameRow->addWidget(new QLabel(mode == Directory ? tr("Directory:") : tr("Name:"), this));
     nameRow->addWidget(m_nameEdit, 1);
 
     m_infoBox = new QFrame(this);
@@ -384,6 +387,7 @@ BuiltInFileDialog::BuiltInFileDialog(Mode mode, const QString &title, const QStr
                                          tr("System dialog..."), this);
     systemButton->setToolTip(tr("Choose in the dialog of the desktop instead (it cannot choose names that are "
                                 "not valid UTF-8)"));
+    systemButton->setVisible(mode != FilesAndDirectories); // the system dialog cannot choose both
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, this);
     m_openButton = buttons->button(QDialogButtonBox::Open);
     if (mode == Directory)
@@ -418,9 +422,7 @@ BuiltInFileDialog::BuiltInFileDialog(Mode mode, const QString &title, const QStr
     connect(m_hiddenButton, &QToolButton::toggled, this, [this](bool on) {
         m_model->showHidden = on;
         QSettings().setValue(kHiddenKey, on);
-        const QString dir = m_dir;
-        m_dir.clear();
-        setDirectory(dir);
+        reload();
     });
     connect(m_pathEdit, &QLineEdit::returnPressed, this, [this] {
         QString path = m_pathEdit->text().trimmed();
@@ -517,16 +519,22 @@ void BuiltInFileDialog::setDirectory(const QString &dir)
     if (!m_dir.isEmpty() && dir != m_dir)
         m_history << m_dir;
     m_dir = dir;
-    const int error = m_model->load(dir);
+    m_model->onlyNames.clear();
+    reload();
+}
+
+void BuiltInFileDialog::reload()
+{
+    const int error = m_model->load(m_dir);
     m_error = error ? tr("The directory cannot be read: %1").arg(QString::fromLocal8Bit(std::strerror(error)))
                     : QString();
     m_nonUtf8 = m_model->nonUtf8Count();
-    m_pathEdit->setText(LocalPath::display(dir));
+    m_pathEdit->setText(LocalPath::display(m_dir));
     m_backButton->setEnabled(!m_history.isEmpty());
-    m_upButton->setEnabled(dir != QLatin1String("/"));
+    m_upButton->setEnabled(m_dir != QLatin1String("/"));
     m_places->clearSelection();
     for (int i = 0; i < m_places->count(); ++i) {
-        if (m_places->item(i)->data(Qt::UserRole).toString() == dir)
+        if (m_places->item(i)->data(Qt::UserRole).toString() == m_dir)
             m_places->item(i)->setSelected(true);
     }
     if (m_sortModel->rowCount() > 0)
@@ -547,9 +555,21 @@ void BuiltInFileDialog::selectNames(const QStringList &names)
     }
 }
 
+void BuiltInFileDialog::showOnly(const QStringList &names)
+{
+    m_model->onlyNames = names;
+    reload();
+}
+
+void BuiltInFileDialog::setNote(const QString &note)
+{
+    m_note = note;
+    updateSelection();
+}
+
 void BuiltInFileDialog::openIndex(const QModelIndex &index)
 {
-    if (index.data(IsDirRole).toBool())
+    if (index.data(IsDirRole).toBool() && m_mode != FilesAndDirectories)
         setDirectory(childPath(index.data(NameRole).toString()));
     else
         acceptSelection();
@@ -559,7 +579,7 @@ QStringList BuiltInFileDialog::selectedPaths() const
 {
     QStringList paths;
     for (const QModelIndex &index : m_view->selectionModel()->selectedRows()) {
-        if (m_mode == Directory || !index.data(IsDirRole).toBool())
+        if (m_mode != Files || !index.data(IsDirRole).toBool())
             paths << childPath(index.data(NameRole).toString());
     }
     if (m_mode == Directory && paths.isEmpty())
@@ -621,6 +641,8 @@ void BuiltInFileDialog::updateSelection()
                                : tr("%1 names here contain bytes that are not valid UTF-8.").arg(m_nonUtf8))
                + QLatin1Char(' ') + tr("They are shown as \\xNN, and the names are kept exactly.");
     }
+    if (!m_note.isEmpty() && m_error.isEmpty())
+        text = !single.isEmpty() ? m_note + QStringLiteral("<br>") + text : m_note; // with the details of the selection
     m_info->setText(text);
     m_infoIcon->setPixmap(QIcon::fromTheme(icon).pixmap(style()->pixelMetric(QStyle::PM_SmallIconSize)));
     m_infoBox->setVisible(!text.isEmpty());

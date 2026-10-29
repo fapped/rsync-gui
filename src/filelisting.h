@@ -29,6 +29,12 @@ QString invalidBytes(const QString &name);
 // `name` with those bytes read as Latin-1, a hint for names from old systems: "caf\xe9" -> "café".
 QString latin1Reading(const QString &name);
 
+// File managers that go through KIO (Dolphin) replace the bytes of names that are not valid UTF-8 with
+// U+FFFD (context menu, drag & drop, clipboard), so the path they pass does not exist. These are the
+// existing paths that such a path can stand for: each U+FFFD matches one or more of those bytes (or
+// itself). Empty for a path without U+FFFD; at most `limit` paths, sorted.
+QStringList replacedBytesMatches(const QString &path, int limit = 64);
+
 // The mount points in the contents of /proc/self/mounts, with escapes such as "\040" (space) decoded.
 QStringList mountPoints(const QByteArray &mounts);
 

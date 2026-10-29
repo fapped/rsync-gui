@@ -288,6 +288,7 @@ private slots:
     void fileListingFromDisplay();
     void fileListingHints();
     void fileListingMountPoints();
+    void fileListingReplacedBytes();
     void remoteRoundTrip();
     void remoteVerifiedMove();
     void remoteSourceMove();
@@ -1878,6 +1879,52 @@ void TestRsyncCore::fileListingHints()
     QCOMPARE(FileListing::latin1Reading(name), QStringLiteral("München été ü.txt"));
     QCOMPARE(FileListing::invalidBytes(QStringLiteral("plain ü")), QString());
     QCOMPARE(FileListing::latin1Reading(QStringLiteral("plain ü")), QStringLiteral("plain ü"));
+}
+
+void TestRsyncCore::fileListingReplacedBytes()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray dir = QFile::encodeName(tmp.path());
+    auto cleanup = qScopeGuard([&] { removeTree(dir + "/d"); });
+    QCOMPARE(::mkdir((dir + "/d").constData(), 0755), 0);
+    const QByteArray d = dir + "/d";
+    writeRaw(d + "/caf\xe9.txt", "");
+    writeRaw(d + "/caf\xe8.txt", "");
+    writeRaw(d + "/caf.txt", "");
+    writeRaw(d + "/na\xefve.txt", "");
+    writeRaw(d + "/two\xe9\xfc.txt", "");
+    writeRaw(d + "/real\xef\xbf\xbd.txt", ""); // U+FFFD in the name itself (valid UTF-8)
+    writeRaw(d + "/dot.\xe9", "");
+    QCOMPARE(::mkdir((d + "/sub\xfc").constData(), 0755), 0);
+    writeRaw(d + "/sub\xfc/x\xff", "");
+    writeRaw(d + "/sub\xfd", ""); // a file: not a directory in the middle of the path
+
+    // As Dolphin passes them: U+FFFD (EF BF BD) in place of the bytes.
+    const auto passed = [&](const QByteArray &name) { return LocalPath::decode(d + '/' + name); };
+    const auto exact = [&](const QList<QByteArray> &names) {
+        QStringList paths;
+        for (const QByteArray &name : names)
+            paths << LocalPath::decode(d + '/' + name);
+        paths.sort();
+        return paths;
+    };
+    QCOMPARE(FileListing::replacedBytesMatches(passed("na\xef\xbf\xbdve.txt")), exact({"na\xefve.txt"}));
+    QCOMPARE(FileListing::replacedBytesMatches(passed("caf\xef\xbf\xbd.txt")), exact({"caf\xe9.txt", "caf\xe8.txt"}));
+    // One U+FFFD can stand for several bytes (depending on the decoder), and several for several.
+    QCOMPARE(FileListing::replacedBytesMatches(passed("two\xef\xbf\xbd.txt")), exact({"two\xe9\xfc.txt"}));
+    QCOMPARE(FileListing::replacedBytesMatches(passed("two\xef\xbf\xbd\xef\xbf\xbd.txt")), exact({"two\xe9\xfc.txt"}));
+    QCOMPARE(FileListing::replacedBytesMatches(passed("real\xef\xbf\xbd.txt")), exact({"real\xef\xbf\xbd.txt"}));
+    // The rest of the name is matched literally ("." is not a pattern).
+    QCOMPARE(FileListing::replacedBytesMatches(passed("dot\xef\xbf\xbd\xef\xbf\xbd")), QStringList());
+    QCOMPARE(FileListing::replacedBytesMatches(passed("dot.\xef\xbf\xbd")), exact({"dot.\xe9"}));
+    // In a directory of the path too.
+    QCOMPARE(FileListing::replacedBytesMatches(passed("sub\xef\xbf\xbd/x\xef\xbf\xbd")), exact({"sub\xfc/x\xff"}));
+    QCOMPARE(FileListing::replacedBytesMatches(passed("sub\xef\xbf\xbd")), exact({"sub\xfc", "sub\xfd"}));
+    QCOMPARE(FileListing::replacedBytesMatches(passed("nothing\xef\xbf\xbd")), QStringList());
+    QCOMPARE(FileListing::replacedBytesMatches(passed("caf.txt")), QStringList()); // no U+FFFD
+    QCOMPARE(FileListing::replacedBytesMatches(QStringLiteral("relative/caf�.txt")), QStringList());
+    QCOMPARE(FileListing::replacedBytesMatches(passed("caf\xef\xbf\xbd.txt"), 1).size(), 1);
 }
 
 void TestRsyncCore::fileListingMountPoints()

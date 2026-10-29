@@ -100,6 +100,8 @@ private:
     QString settingsDialogDir() const;
     void rememberSettingsDialogDir(const QString &file) const;
     static QStringList pathsFromMimeData(const QMimeData *mime);
+    // Paths with U+FFFD from a file manager that match several names: the user chooses in the built-in dialog.
+    void chooseReplacedBytesMatches(const QList<QPair<QString, QStringList>> &paths);
 
     QListWidget *m_sourceList = nullptr;
     QLineEdit *m_sourceEdit = nullptr;
