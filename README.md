@@ -170,9 +170,13 @@ turns the detection off completely.
 
 ## Dolphin context menu
 
-After installation Dolphin shows an **Rsync** submenu for files and directories:
+After installation Dolphin shows an **Rsync** submenu for files and directories (left: a file,
+right: a directory):
 
-![The Rsync submenu in Dolphin](docs/screenshots/context-menu.png)
+<p>
+<img src="docs/screenshots/context-menu-file.png" width="49%" alt="The Rsync submenu in Dolphin for a file">
+<img src="docs/screenshots/context-menu-dir.png" width="49%" alt="The Rsync submenu in Dolphin for a directory">
+</p>
 
 - **Copy (-a)…** — `--preset rsync-copy` (formerly *Copy (rsync)*, `rsync -avhP`),
 - **Copy and verify (-ac)…** — `--preset rsync-copy-verify` (formerly *Copy (rsync + verify)*, `rsync -avhPc`),
