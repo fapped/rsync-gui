@@ -2,9 +2,12 @@
 // function drives the window with timers and saves QWidget::grab() of single widgets, so nothing
 // else on the screen ends up in the images. Started by tools/make-screenshots.sh.
 
+#include "filedialog.h"
+#include "localpath.h"
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QListWidget>
 #include <QGroupBox>
 #include <QMenu>
 #include <QMenuBar>
@@ -12,6 +15,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTimer>
+#include <QToolButton>
 
 #include <cstdio>
 #include <functional>
@@ -80,6 +84,49 @@ void catchMessageBox(const QString &name, QMessageBox::ButtonRole role)
     });
 }
 
+// The built-in file dialog, opened from the menu next to "Add directory...", in the demo directory with
+// names that are not valid UTF-8 (SCREENSHOT_NAMES_DIR). The devices of the machine are left out.
+void saveFileDialog(MainWindow *w, const QString &name, std::function<void()> then)
+{
+    QToolButton *menuButton = nullptr;
+    for (QToolButton *b : w->findChildren<QToolButton *>()) {
+        if (b->menu() && b->text() == QStringLiteral("Built-in file dialog"))
+            menuButton = b;
+    }
+    if (!menuButton) {
+        std::printf("FAILED %s: no menu button\n", qPrintable(name));
+        then();
+        return;
+    }
+    after(800, [name] {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *dialog = qobject_cast<BuiltInFileDialog *>(widget);
+            if (!dialog || !dialog->isVisible())
+                continue;
+            auto *places = dialog->findChild<QListWidget *>();
+            for (int i = 0; i < places->count(); ++i) {
+                if (places->item(i)->text() == QStringLiteral("Devices")) {
+                    while (places->count() > i)
+                        delete places->takeItem(i);
+                    break;
+                }
+            }
+            dialog->setDirectory(LocalPath::decode(qgetenv("SCREENSHOT_NAMES_DIR")));
+            dialog->selectNames({LocalPath::decode("caf\xe9.jpg")});
+            after(300, [dialog, name] {
+                save(dialog, name);
+                dialog->reject();
+            });
+            return;
+        }
+        std::printf("FAILED %s: no dialog\n", qPrintable(name));
+    });
+    after(0, [menuButton, then] {
+        menuButton->menu()->actions().at(0)->trigger(); // returns when the dialog is closed
+        then();
+    });
+}
+
 void run()
 {
     MainWindow *w = window();
@@ -127,7 +174,10 @@ void run()
             after(300, [w] {
                 catchMessageBox(QStringLiteral("rsync-gui-move-confirm.png"), QMessageBox::RejectRole);
                 button(w, QStringLiteral("Move"))->click();
-                after(800, [] { QApplication::quit(); });
+                // 6. The built-in file dialog.
+                after(800, [w] {
+                    saveFileDialog(w, QStringLiteral("rsync-gui-file-dialog.png"), [] { QApplication::quit(); });
+                });
             });
         });
     });
