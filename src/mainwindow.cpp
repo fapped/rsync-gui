@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "localpath.h"
+#include "speedgraph.h"
 
 #include <QAction>
 #include <QApplication>
@@ -341,7 +342,7 @@ void MainWindow::buildUi()
 
     // --- Run ---
     auto *runRow = new QHBoxLayout;
-    m_progress = new QProgressBar(central);
+    m_progress = new SpeedGraph(central);
     m_progress->setRange(0, 1000);
     m_progress->setValue(0);
     m_progress->setFormat(QStringLiteral("%p%"));
@@ -1167,6 +1168,11 @@ void MainWindow::startCopy()
     startDesktopProgress(options, dest);
     connect(m_job, &RsyncJob::log, this, &MainWindow::appendLog);
     connect(m_job, &RsyncJob::progress, m_progress, &QProgressBar::setValue);
+    connect(m_job, &RsyncJob::transferRateChanged, m_progress, [this](qint64 bytesPerSecond) {
+        m_progress->addSpeed(bytesPerSecond);
+    });
+    // Every rsync run starts its own speed measurement; verification and removal report none.
+    connect(m_job, &RsyncJob::phaseChanged, m_progress, &SpeedGraph::pauseSpeed);
     connect(m_job, &RsyncJob::currentFileChanged, this, [this](const QString &file) {
         m_currentFile->setText(file);
     });
@@ -1195,6 +1201,7 @@ void MainWindow::startCopy()
         m_progress->setRange(0, 0);
     else
         m_progress->setRange(0, 1000);
+    m_progress->start();
     m_tabs->setCurrentIndex(m_tabs->indexOf(m_log->parentWidget()));
     m_job->start();
     updateControls();
@@ -1317,6 +1324,7 @@ void MainWindow::onJobFinished()
         m_desktopProgress->finish(false, tr("Verification found %1 difference(s).").arg(summary.differences));
     else
         m_desktopProgress->finish(false, tr("Finished with errors."));
+    m_progress->stop();
     m_progress->setRange(0, 1000);
     m_transferStatus->clear();
     // After a move, sources that no longer exist were transferred and removed - drop them from the list.

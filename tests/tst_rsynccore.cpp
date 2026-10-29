@@ -2,6 +2,7 @@
 #include "location.h"
 #include "rsyncjob.h"
 #include "rsyncoptions.h"
+#include "speedhistory.h"
 
 #include <QDir>
 #include <QFile>
@@ -276,6 +277,11 @@ private slots:
     void cancelDuringCacheDrop_data();
     void cancelDuringCacheDrop();
     void deleteJobDuringCacheDrop();
+    void speedHistoryAverages();
+    void speedHistoryGaps();
+    void speedHistoryMergesBuckets();
+    void speedHistoryNiceScale_data();
+    void speedHistoryNiceScale();
     void remoteRoundTrip();
     void remoteVerifiedMove();
     void remoteSourceMove();
@@ -1687,6 +1693,107 @@ void TestRsyncCore::deleteJobDuringCacheDrop()
     QVERIFY(!finished);
     QVERIFY2(threadsDuring > threadsBefore, "the cache was not being dropped in a thread when the job was deleted");
     QCOMPARE(threadsAfter, threadsBefore);
+}
+
+void TestRsyncCore::speedHistoryAverages()
+{
+    SpeedHistory history(512, 250, 5000);
+    qint64 bucketMs = 0;
+    QVERIFY(history.averages(1000, &bucketMs).isEmpty());
+    QCOMPARE(history.peak(1000), 0.0);
+
+    // Each sample holds until the next one; the last one until "now".
+    history.addSample(0, 1000);
+    history.addSample(500, 3000);
+    QCOMPARE(history.averages(1000, &bucketMs), QList<double>({1000, 1000, 3000, 3000}));
+    QCOMPARE(bucketMs, qint64(250));
+    QCOMPARE(history.peak(1000), 3000.0);
+
+    // A change in the middle of a bucket: the average weighted by time.
+    history.clear();
+    history.addSample(0, 1000);
+    history.addSample(125, 3000);
+    QCOMPARE(history.averages(250), QList<double>({2000}));
+    // Negative speeds (unknown) count as 0.
+    history.clear();
+    history.addSample(0, -1);
+    QCOMPARE(history.averages(250), QList<double>({0}));
+}
+
+void TestRsyncCore::speedHistoryGaps()
+{
+    SpeedHistory history(512, 250, 5000);
+    history.addSample(0, 1000);
+    history.pause(500);
+    history.addSample(1000, 2000);
+    QCOMPARE(history.averages(1500), QList<double>({1000, 1000, -1, -1, 2000, 2000}));
+    history.pause(1500);
+    QCOMPARE(history.averages(3000), QList<double>({1000, 1000, -1, -1, 2000, 2000}));
+
+    // A sample does not hold for longer than 5 s.
+    history.clear();
+    history.addSample(0, 1000);
+    QCOMPARE(history.averages(10000), QList<double>(20, 1000));
+    history.addSample(10000, 500);
+    const QList<double> averages = history.averages(10250);
+    QCOMPARE(averages.size(), 41);
+    QCOMPARE(averages.mid(0, 20), QList<double>(20, 1000));
+    QCOMPARE(averages.mid(20, 20), QList<double>(20, -1));
+    QCOMPARE(averages.last(), 500.0);
+}
+
+void TestRsyncCore::speedHistoryMergesBuckets()
+{
+    SpeedHistory history(4, 100, 100000);
+    history.addSample(0, 1000);
+    history.addSample(400, 3000);
+    qint64 bucketMs = 0;
+    QCOMPARE(history.averages(400, &bucketMs), QList<double>(4, 1000));
+    QCOMPARE(bucketMs, qint64(100));
+    // "Now" beyond 4 buckets: the result has longer buckets, the history itself does not change.
+    QCOMPARE(history.averages(800, &bucketMs), QList<double>({1000, 1000, 3000, 3000}));
+    QCOMPARE(bucketMs, qint64(200));
+    QCOMPARE(history.averages(400, &bucketMs), QList<double>(4, 1000));
+    QCOMPARE(bucketMs, qint64(100));
+    // Merged twice; the last bucket has a known speed for half of it.
+    history.addSample(1000, 0);
+    QCOMPARE(history.averages(1000, &bucketMs), QList<double>({1000, 3000, 3000}));
+    QCOMPARE(bucketMs, qint64(400));
+    history.clear();
+    history.addSample(0, 1);
+    QCOMPARE(history.averages(100, &bucketMs), QList<double>({1}));
+    QCOMPARE(bucketMs, qint64(100));
+}
+
+void TestRsyncCore::speedHistoryNiceScale_data()
+{
+    QTest::addColumn<double>("speed");
+    QTest::addColumn<qint64>("scale");
+    const qint64 KiB = 1024;
+    const qint64 MiB = 1024 * KiB;
+    const qint64 GiB = 1024 * MiB;
+    QTest::newRow("0") << 0.0 << qint64(1);
+    QTest::newRow("1.2 B") << 1.2 << qint64(2);
+    QTest::newRow("3 B") << 3.0 << qint64(3);
+    QTest::newRow("14 B") << 14.0 << qint64(15);
+    QTest::newRow("999 B") << 999.0 << KiB;
+    QTest::newRow("1 KiB") << double(KiB) << KiB;
+    QTest::newRow("1.2 KiB") << 1.2 * double(KiB) << KiB * 3 / 2;
+    QTest::newRow("700 KiB") << double(700 * KiB) << 800 * KiB;
+    QTest::newRow("900 KiB") << double(900 * KiB) << MiB;
+    QTest::newRow("1 MiB") << double(MiB) << MiB;
+    QTest::newRow("37 MiB") << double(37 * MiB) << 40 * MiB;
+    QTest::newRow("101 MiB") << double(101 * MiB) << 150 * MiB;
+    QTest::newRow("600 MiB") << double(600 * MiB) << 600 * MiB;
+    QTest::newRow("1.5 GiB") << 1.5 * double(GiB) << GiB * 3 / 2;
+    QTest::newRow("1.6 GiB") << 1.6 * double(GiB) << 2 * GiB;
+}
+
+void TestRsyncCore::speedHistoryNiceScale()
+{
+    QFETCH(double, speed);
+    QFETCH(qint64, scale);
+    QCOMPARE(SpeedHistory::niceScale(speed), scale);
 }
 
 void TestRsyncCore::remoteRoundTrip()

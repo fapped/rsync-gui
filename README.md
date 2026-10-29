@@ -22,8 +22,9 @@ be passed as additional arguments.
   **any other arguments** (e.g. `--exclude='*.tmp' --mkpath`),
 - **verification after copying**: a second rsync pass that compares checksums of the source and the
   destination and lists every file that differs or is missing,
-- preview of the generated command, progress bar (per file or overall), speed and ETA, a log with
-  the time of every line (the date in the line that starts a run and when the day changes),
+- preview of the generated command, progress bar (per file or overall) with a live **speed graph**
+  behind it, speed and ETA, a log with the time of every line (the date in the line that starts
+  a run and when the day changes),
   cancellation, confirmation only for options that delete files, optional **closing the window
   when the transfer finishes** successfully,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
@@ -196,6 +197,13 @@ way when `SSH_ASKPASS_REQUIRE=prefer` is set (Plasma sets it); otherwise the hos
 
 If you used your own rsync service menu before, remove it to avoid duplicated entries.
 New entries usually appear immediately; if not, run `kbuildsycoca6`.
+
+## Speed graph
+
+Behind the progress bar of the window there is a graph of the speed reported by rsync. The x axis is
+the time since the start (at least 10 seconds while running, the whole job after it ends), the top
+of the graph is the speed in its top left corner. Verification and removing the sources report no
+speed, so the graph has a gap there. The graph of the last job stays until the next one starts.
 
 ## Progress outside the window
 

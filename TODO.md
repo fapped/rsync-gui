@@ -39,11 +39,11 @@
       an option turns it off
 - [x] Unknown ssh host keys: ssh asks through `SSH_ASKPASS` (Plasma: ksshaskpass with `SSH_ASKPASS_REQUIRE=prefer`),
       the question about the host key and the password checked by the user in the GUI (2026-10-28)
+- [x] Speed graph in the application window: behind the progress bar (time on the x axis, the scale in
+      the corner), `SpeedHistory` in the core library with tests
 
 ## To do
 
-- [ ] Later: the speed graph also in the application window, not only in the Plasma notification
-      (e.g. a live speed graph in place of the progress bar, with the progress shown over it)
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
