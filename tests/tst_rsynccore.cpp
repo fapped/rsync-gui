@@ -1,3 +1,4 @@
+#include "filelisting.h"
 #include "localpath.h"
 #include "location.h"
 #include "rsyncjob.h"
@@ -282,6 +283,11 @@ private slots:
     void speedHistoryMergesBuckets();
     void speedHistoryNiceScale_data();
     void speedHistoryNiceScale();
+    void fileListingKeepsNames();
+    void fileListingFromDisplay_data();
+    void fileListingFromDisplay();
+    void fileListingHints();
+    void fileListingMountPoints();
     void remoteRoundTrip();
     void remoteVerifiedMove();
     void remoteSourceMove();
@@ -1794,6 +1800,100 @@ void TestRsyncCore::speedHistoryNiceScale()
     QFETCH(double, speed);
     QFETCH(qint64, scale);
     QCOMPARE(SpeedHistory::niceScale(speed), scale);
+}
+
+void TestRsyncCore::fileListingKeepsNames()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QByteArray dir = QFile::encodeName(tmp.path());
+    auto cleanup = qScopeGuard([&] {
+        for (const char *name : {"caf\xe9.txt", "caf\xe8.txt", "dir\xff", "link\xfe"})
+            removeTree(dir + '/' + name);
+    });
+    writeRaw(dir + "/caf\xe9.txt", "12345");
+    writeRaw(dir + "/caf\xe8.txt", "1");
+    writeRaw(dir + "/r\xc3\xa9sum\xc3\xa9.txt", "");
+    QCOMPARE(::mkdir((dir + "/dir\xff").constData(), 0755), 0);
+    QCOMPARE(::symlink("dir\xff", (dir + "/link\xfe").constData()), 0);
+
+    int error = -1;
+    QList<FileListing::Entry> entries = FileListing::list(LocalPath::decode(dir), &error);
+    QCOMPARE(error, 0);
+    std::sort(entries.begin(), entries.end(),
+              [](const FileListing::Entry &a, const FileListing::Entry &b) { return LocalPath::encode(a.name) < LocalPath::encode(b.name); });
+    QStringList names;
+    for (const FileListing::Entry &entry : std::as_const(entries))
+        names << LocalPath::display(entry.name);
+    QCOMPARE(names, (QStringList{QStringLiteral("caf\\xe8.txt"), QStringLiteral("caf\\xe9.txt"), QStringLiteral("dir\\xff"), QStringLiteral("link\\xfe"), QStringLiteral("résumé.txt")}));
+    // The names give the exact bytes back.
+    QCOMPARE(LocalPath::encode(entries.at(1).name), QByteArray("caf\xe9.txt"));
+    QCOMPARE(entries.at(1).size, 5);
+    QVERIFY(!entries.at(1).isDir);
+    QVERIFY(entries.at(2).isDir);
+    QVERIFY(!entries.at(2).isSymLink);
+    QVERIFY(entries.at(3).isDir); // a symlink to a directory
+    QVERIFY(entries.at(3).isSymLink);
+    QVERIFY(LocalPath::isPlain(entries.at(4).name));
+    QVERIFY(entries.at(1).modified > 0);
+
+    // A directory that is not valid UTF-8 itself, and one that does not exist.
+    writeRaw(dir + "/dir\xff/inside\xfd", "x");
+    entries = FileListing::list(LocalPath::decode(dir + "/dir\xff/"), &error);
+    QCOMPARE(error, 0);
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(LocalPath::encode(entries.first().name), QByteArray("inside\xfd"));
+    QVERIFY(FileListing::list(LocalPath::decode(dir + "/missing"), &error).isEmpty());
+    QCOMPARE(error, ENOENT);
+}
+
+void TestRsyncCore::fileListingFromDisplay_data()
+{
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QByteArray>("bytes");
+    QTest::newRow("plain") << QStringLiteral("/a/b c") << QByteArray("/a/b c");
+    QTest::newRow("byte") << QStringLiteral("/a/caf\\xe9.txt") << QByteArray("/a/caf\xe9.txt");
+    QTest::newRow("upper case") << QStringLiteral("/a/\\xFF") << QByteArray("/a/\xff");
+    QTest::newRow("several") << QStringLiteral("\\xfc\\xfd-\\x80") << QByteArray("\xfc\xfd-\x80");
+    QTest::newRow("valid UTF-8 as bytes") << QStringLiteral("r\\xc3\\xa9sum\\xc3\\xa9") << QByteArray("r\xc3\xa9sum\xc3\xa9");
+    QTest::newRow("ASCII escape stays text") << QStringLiteral("a\\x41") << QByteArray("a\\x41");
+    QTest::newRow("incomplete") << QStringLiteral("a\\xe") << QByteArray("a\\xe");
+    QTest::newRow("non-ASCII text") << QStringLiteral("ü\\xe9") << QByteArray("\xc3\xbc\xe9");
+}
+
+void TestRsyncCore::fileListingFromDisplay()
+{
+    QFETCH(QString, text);
+    QFETCH(QByteArray, bytes);
+    const QString path = FileListing::fromDisplay(text);
+    QCOMPARE(LocalPath::encode(path), bytes);
+    // The same string as a directory listing gives for these bytes.
+    QCOMPARE(path, LocalPath::decode(bytes));
+}
+
+void TestRsyncCore::fileListingHints()
+{
+    const QString name = LocalPath::decode("M\xfcnchen \xe9t\xe9 \xc3\xbc.txt");
+    QCOMPARE(FileListing::invalidBytes(name), QStringLiteral("FC E9 E9"));
+    QCOMPARE(FileListing::latin1Reading(name), QStringLiteral("München été ü.txt"));
+    QCOMPARE(FileListing::invalidBytes(QStringLiteral("plain ü")), QString());
+    QCOMPARE(FileListing::latin1Reading(QStringLiteral("plain ü")), QStringLiteral("plain ü"));
+}
+
+void TestRsyncCore::fileListingMountPoints()
+{
+    const QByteArray mounts = "/dev/sda1 / ext4 rw,relatime 0 0\n"
+                              "proc /proc proc rw 0 0\n"
+                              "/dev/sdb1 /media/user/OLD\\040DISK vfat rw 0 0\n"
+                              "/dev/sdc1 /media/user/caf\\351 vfat rw 0 0\n"
+                              "/dev/sdd1 /mnt/back\\134slash ext4 rw 0 0\n"
+                              "\n";
+    const QStringList points = FileListing::mountPoints(mounts);
+    QCOMPARE(points.size(), 5);
+    QCOMPARE(points.at(0), QStringLiteral("/"));
+    QCOMPARE(points.at(2), QStringLiteral("/media/user/OLD DISK"));
+    QCOMPARE(LocalPath::encode(points.at(3)), QByteArray("/media/user/caf\xe9"));
+    QCOMPARE(points.at(4), QStringLiteral("/mnt/back\\slash"));
 }
 
 void TestRsyncCore::remoteRoundTrip()

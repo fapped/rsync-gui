@@ -19,6 +19,7 @@ add_library(rsynccore STATIC
     src/rsyncoptions.h src/rsyncoptions.cpp
     src/rsyncjob.h src/rsyncjob.cpp
     src/speedhistory.h src/speedhistory.cpp
+    src/filelisting.h src/filelisting.cpp
 )
 target_include_directories(rsynccore PUBLIC src)
 target_link_libraries(rsynccore PUBLIC Qt6::Core)
@@ -29,6 +30,7 @@ qt_add_executable(rsync-gui
     src/mainwindow.h src/mainwindow.cpp
     src/desktopprogress.h src/desktopprogress.cpp
     src/speedgraph.h src/speedgraph.cpp
+    src/filedialog.h src/filedialog.cpp
 )
 target_link_libraries(rsync-gui PRIVATE rsynccore Qt6::Widgets Qt6::DBus Qt6::Concurrent)
 

@@ -80,8 +80,9 @@ private:
     void addTypedSource();
     void pasteSources();
     void removeSelectedSources();
-    void browseFiles();
-    void browseDirectory();
+    // `builtIn`: the built-in file dialog, otherwise the preferred one.
+    void browseFiles(bool builtIn = false);
+    void browseDirectory(bool builtIn = false);
     void browseProgram();
     void importSettings();
     void exportSettings();

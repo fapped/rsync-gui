@@ -382,14 +382,25 @@ the list, presets are not listed there (they have *Load preset*).
 ## File names that are not valid UTF-8
 
 Linux file names are bytes, and old files (e.g. from Windows/Latin-1 times or broken archives) may
-contain bytes that are not valid UTF-8. Rsync GUI keeps such names exactly — from the command line
-(Dolphin), `file://` URLs, drag & drop and the clipboard — and passes the exact bytes to rsync.
+contain bytes that are not valid UTF-8. Rsync GUI keeps such names exactly — from the command line,
+`file://` URLs with the bytes (`caf%E9`), drag & drop, the clipboard and the built-in file dialog —
+and passes the exact bytes to rsync.
 They are shown with `\xNN` escapes (e.g. `caf\xe9`), and the command preview uses bash's `$'...'`
 quoting, so it can be pasted into a terminal. rsync itself shows them as `\#351` in its output.
 Names inside source directories were never a problem (rsync reads them itself).
 
-Only the file dialogs (*Add files…*, *Browse…*) cannot return such names — Qt converts them on the
-way; use Dolphin, drag & drop or paste instead.
+The system file dialog cannot choose such names: KDE's dialog shows them with `�` and then reports
+that the file does not exist. The **⋮** button next to *Add directory…* opens the **built-in file
+dialog** instead, which lists the directories itself. It shows such names with `\xNN` badges and,
+for a selected one, how it reads as Latin-1 (e.g. `caf\xe9.jpg` → *café.jpg*), which helps to tell
+apart names like `caf\xe9` and `caf\xe8`. *Always use the built-in dialog* in the same menu makes it
+the dialog of *Add files…*, *Add directory…* and *Browse…* of the destination; its *System dialog…*
+button opens the system dialog for one time.
+
+Dolphin converts such names too (KIO replaces the bytes): what it passes from the context menu,
+drag & drop and *Copy* holds `�` (U+FFFD) instead, e.g. `caf%EF%BF%BD.jpg` for both `caf\xe9.jpg` and
+`caf\xe8.jpg` — a name that does not exist. Choose such files in the built-in dialog. A directory with
+a plain name can be added from Dolphin as usual, whatever names it contains.
 
 ## AI disclosure
 

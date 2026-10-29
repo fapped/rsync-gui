@@ -26,7 +26,7 @@
 - [x] *Move and verify (-ac)…*: the sources are removed only after a successful verification
 - [x] Preset labels with the flags that decide what is copied, e.g. *Copy to FAT/NTFS/NAS (-rlt)*
 - [x] File names that are not valid UTF-8: kept exactly (command line, URLs, drag & drop, clipboard),
-      passed to rsync as bytes, shown with `\xNN`
+      passed to rsync as bytes, shown with `\xNN` (but Dolphin itself converts such names, see To do)
 - [x] Recently used settings files (*File → Recent settings*)
 - [x] "Close when finished" checkbox (remembered window preference, only after a full success)
 - [x] Consistent preset names: the same name in *Load preset*, the options title and the Dolphin menu
@@ -41,13 +41,18 @@
       the question about the host key and the password checked by the user in the GUI (2026-10-28)
 - [x] Speed graph in the application window: behind the progress bar (time on the x axis, the scale in
       the corner), `SpeedHistory` in the core library with tests
+- [x] Built-in file dialog for names that are not valid UTF-8 (KDE's dialog shows them with U+FFFD and
+      then reports that the file does not exist): the ⋮ menu next to *Add directory…*, optionally for
+      all file dialogs of the sources and the destination; `FileListing` in the core library with tests
 
 ## To do
 
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
-- [ ] File dialogs cannot return names that are not valid UTF-8 (Qt converts them) - a KIO/portal-based
-      dialog or a custom one would be needed
+- [ ] Dolphin (KIO) passes names that are not valid UTF-8 with U+FFFD in place of the bytes (context menu,
+      drag & drop, clipboard; checked with *Copy* in Dolphin: `caf%EF%BF%BD`). Such a path that does not exist
+      could be matched against the directory listing: one match - the exact name, several - choose in the
+      built-in dialog
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
 - [ ] Very low priority: start the copy right after choosing the destination from Dolphin (`--start`).

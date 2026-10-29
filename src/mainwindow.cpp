@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "filedialog.h"
 #include "localpath.h"
 #include "speedgraph.h"
 
@@ -40,6 +41,7 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QDateTime>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -123,8 +125,28 @@ void MainWindow::buildUi()
     pasteButton->setToolTip(tr("Add paths from the clipboard (one per line, or files copied in a file manager)"));
     m_removeSourcesButton = new QPushButton(QIcon::fromTheme(QStringLiteral("list-remove")), tr("Remove"), m_sourceBox);
     m_clearSourcesButton = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear-list")), tr("Clear"), m_sourceBox);
+    // The built-in file dialog, for names that are not valid UTF-8 (the system dialog cannot choose them).
+    auto *fileDialogButton = new QToolButton(m_sourceBox);
+    fileDialogButton->setIcon(QIcon::fromTheme(QStringLiteral("overflow-menu")));
+    fileDialogButton->setText(tr("Built-in file dialog")); // for screen readers; the button shows the icon only
+    fileDialogButton->setToolTip(tr("The built-in file dialog, which can also choose names that are not valid UTF-8"));
+    fileDialogButton->setPopupMode(QToolButton::InstantPopup);
+    auto *fileDialogMenu = new QMenu(fileDialogButton);
+    fileDialogMenu->setToolTipsVisible(true);
+    fileDialogMenu->addAction(QIcon::fromTheme(QStringLiteral("document-open")), tr("Add files with the built-in dialog..."),
+                              this, [this] { browseFiles(true); });
+    fileDialogMenu->addAction(QIcon::fromTheme(QStringLiteral("folder-open")),
+                              tr("Add directory with the built-in dialog..."), this, [this] { browseDirectory(true); });
+    fileDialogMenu->addSeparator();
+    QAction *preferBuiltIn = fileDialogMenu->addAction(tr("Always use the built-in dialog"));
+    preferBuiltIn->setToolTip(tr("Also for Add files..., Add directory... and Browse... of the destination"));
+    preferBuiltIn->setCheckable(true);
+    preferBuiltIn->setChecked(FileDialog::builtInPreferred());
+    connect(preferBuiltIn, &QAction::toggled, this, &FileDialog::setBuiltInPreferred);
+    fileDialogButton->setMenu(fileDialogMenu);
     sourceButtons->addWidget(addFilesButton);
     sourceButtons->addWidget(addDirButton);
+    sourceButtons->addWidget(fileDialogButton);
     sourceButtons->addWidget(pasteButton);
     sourceButtons->addStretch(1);
     sourceButtons->addWidget(m_removeSourcesButton);
@@ -385,8 +407,8 @@ void MainWindow::buildUi()
 
     connect(m_sourceEdit, &QLineEdit::returnPressed, this, &MainWindow::addTypedSource);
     connect(addButton, &QPushButton::clicked, this, &MainWindow::addTypedSource);
-    connect(addFilesButton, &QPushButton::clicked, this, &MainWindow::browseFiles);
-    connect(addDirButton, &QPushButton::clicked, this, &MainWindow::browseDirectory);
+    connect(addFilesButton, &QPushButton::clicked, this, [this] { browseFiles(); });
+    connect(addDirButton, &QPushButton::clicked, this, [this] { browseDirectory(); });
     connect(pasteButton, &QPushButton::clicked, this, &MainWindow::pasteSources);
     connect(pasteAction, &QAction::triggered, this, &MainWindow::pasteSources);
     connect(m_removeSourcesButton, &QPushButton::clicked, this, &MainWindow::removeSelectedSources);
@@ -923,17 +945,19 @@ void MainWindow::removeSelectedSources()
     updateControls();
 }
 
-void MainWindow::browseFiles()
+void MainWindow::browseFiles(bool builtIn)
 {
-    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select files to copy"), QDir::homePath(),
-                                                            QString(), nullptr, QFileDialog::DontResolveSymlinks);
+    const QStringList files = FileDialog::openFiles(this, tr("Select files to copy"), QDir::homePath(),
+                                                    builtIn ? FileDialog::Kind::BuiltIn : FileDialog::Kind::Preferred,
+                                                    QFileDialog::DontResolveSymlinks);
     addSources(files);
 }
 
-void MainWindow::browseDirectory()
+void MainWindow::browseDirectory(bool builtIn)
 {
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select a directory to copy"), QDir::homePath(),
-                                                          QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    const QString dir = FileDialog::existingDirectory(this, tr("Select a directory to copy"), QDir::homePath(),
+                                                      builtIn ? FileDialog::Kind::BuiltIn : FileDialog::Kind::Preferred,
+                                                      QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
     if (!dir.isEmpty())
         addSources({dir});
 }
@@ -960,8 +984,7 @@ void MainWindow::browseDestination()
     }
     if (start.isEmpty())
         start = QDir::homePath();
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select the destination directory"), start,
-                                                          QFileDialog::ShowDirsOnly);
+    const QString dir = FileDialog::existingDirectory(this, tr("Select the destination directory"), start);
     if (!dir.isEmpty()) {
         setDestination(dir);
         m_startButton->setFocus();
