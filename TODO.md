@@ -56,6 +56,24 @@
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
+- [ ] Run rsync on the server when the source and the destination are on the same host, so the data does not
+      go through this computer (`ssh host rsync SRC DST`). Today two remote locations are rejected, and a copy
+      between two directories of a mounted network share (CIFS, sshfs) reads and writes everything over the network:
+  - [ ] Mounted shares from `/proc/self/mountinfo`: sshfs gives `host:/path` directly; CIFS gives `//host/share`,
+        the path of the share on the server read once with `ssh host testparm -s --section-name=SHARE
+        --parameter-name=path` (Samba), remembered and editable in the settings
+  - [ ] The same for `sftp://` sources and destinations on the same host (Dolphin browsing a server)
+  - [ ] Choosing the transfer: both on the same host → rsync on the server with the server's paths; one side
+        local → rsync over ssh instead of through the mount (delta transfer, times and permissions kept);
+        otherwise through the mount as now, with a warning that the data crosses the network twice
+  - [ ] An option "Run on the server when possible" (on by default); the full `ssh host rsync …` in the command preview
+  - [ ] Arguments quoted for the remote shell (also names that are not valid UTF-8)
+  - [ ] Cancelling: killing the local ssh does not stop the remote rsync at once (`ssh -tt`, or the remote PID + `kill`)
+  - [ ] Checks done over ssh: sources exist, the destination is not inside a source, free space (`df`),
+        total size for the progress and the graph (`du`); removing emptied source directories after a move
+  - [ ] Files are created by the ssh user, not by Samba: warn when the share uses `force user` / `force group`,
+        or a different user; optionally `--chmod` from `create mask` / `directory mask`; the ssh user needs a shell
+  - [ ] Tests: `tools/ssh-test` container extended with Samba (mounting CIFS needs root - checked by hand)
 - [ ] Very low priority: start the copy right after choosing the destination from Dolphin (`--start`).
       To consider instead: copy & paste - *Copy* in Dolphin (the URLs in the clipboard), then a service menu
       entry on the destination directory, e.g. *Rsync → Paste here*, that takes the sources from the clipboard
