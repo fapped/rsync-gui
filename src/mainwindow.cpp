@@ -408,7 +408,8 @@ void MainWindow::buildUi()
     m_logToFileCheck = new QCheckBox(tr("Save the log to a file"), logPage);
     m_logToFileCheck->setToolTip(tr("Write the log of each run to a file in %1 (readable by you only).")
                                      .arg(RunLog::defaultDirectory(QStringLiteral("rsync-gui"))));
-    // The directory of the log files next to the checkbox - a link that opens it in the file manager.
+    // The directory of the log files next to the checkbox - a link that opens it in the file manager, always
+    // active (also with the option off or while a job runs: the logs of earlier runs can be looked at).
     const QString logDirectory = RunLog::defaultDirectory(QStringLiteral("rsync-gui"));
     auto *logDirectoryLabel = new QLabel(QStringLiteral("<a href=\"%1\">%2</a>")
                                              .arg(QUrl::fromLocalFile(logDirectory).toString().toHtmlEscaped(),
@@ -420,9 +421,6 @@ void MainWindow::buildUi()
         if (!RunLog::makeDirectory(logDirectory) || !QDesktopServices::openUrl(QUrl::fromLocalFile(logDirectory)))
             appendLog(RsyncJob::LogLevel::Warning, tr("Cannot open %1").arg(logDirectory));
     });
-    // Greyed out while the log is not saved.
-    logDirectoryLabel->setEnabled(m_logToFileCheck->isChecked());
-    connect(m_logToFileCheck, &QCheckBox::toggled, logDirectoryLabel, &QWidget::setEnabled);
     auto *logButtons = new QHBoxLayout;
     logButtons->addWidget(m_logToFileCheck);
     logButtons->addWidget(logDirectoryLabel);
