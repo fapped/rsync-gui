@@ -1213,6 +1213,7 @@ void TestRsyncCore::jsonRoundTrip()
     o.remoteShell = "ssh -i key";
     o.extraArguments = "--exclude='*.tmp'";
     o.autoModifyWindow = false;
+    o.logToFile = false;
 
     QString error;
     const RsyncOptions copy = RsyncOptions::fromJson(o.toJson(), &error);
@@ -1490,6 +1491,14 @@ void TestRsyncCore::modifyWindowArgument()
     QVERIFY(options.arguments().filter(QStringLiteral("--modify-window")).isEmpty());
     // On by default; turned off it is kept (the window then never sets modifyWindow).
     QVERIFY(RsyncOptions().autoModifyWindow);
+    // The log is saved to a file by default; presets without the key keep the current choice.
+    QVERIFY(RsyncOptions().logToFile);
+    {
+        RsyncOptions base;
+        base.logToFile = false;
+        QString error;
+        QVERIFY(!RsyncOptions::fromJson(QJsonObject{{"checksum", true}}, &error, base).logToFile);
+    }
     QCOMPARE(RsyncOptions().toJson().value("autoModifyWindow").toBool(true), true);
     // Not a saved option.
     RsyncOptions plain;

@@ -20,6 +20,7 @@ add_library(rsynccore STATIC
     src/rsyncjob.h src/rsyncjob.cpp
     src/speedhistory.h src/speedhistory.cpp
     src/filelisting.h src/filelisting.cpp
+    src/runlog.h src/runlog.cpp
 )
 target_include_directories(rsynccore PUBLIC src)
 target_link_libraries(rsynccore PUBLIC Qt6::Core)

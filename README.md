@@ -244,6 +244,16 @@ verification differences, cancelling or a dry run the window always stays open w
 It is a window preference, remembered immediately — also in a window opened from Dolphin with a
 preset — and not part of the settings files or presets.
 
+*Quit*, next to *Copy* and *Cancel*, closes the window; during a transfer it asks first whether to
+cancel it.
+
+## Log files
+
+*Save the log to a file* under the log (on by default) writes the log of every run to
+`~/.local/state/rsync-gui/logs/<date>_<time>.log` (`$XDG_STATE_HOME`), readable by you only; the
+log in the window says which file. It is an option like the others: remembered between runs and
+kept in settings files and presets (the shipped presets leave it as it is).
+
 ## Archive mode and its parts
 
 `-a` means `-rlptgoD`. With *Archive mode (-a)* on, its parts are shown checked and cannot be changed;

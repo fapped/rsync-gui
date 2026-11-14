@@ -375,6 +375,8 @@ void MainWindow::buildUi()
     m_startButton->setStyleSheet(QStringLiteral("QPushButton:enabled { font-weight: bold; padding: 4px 16px; }"));
     m_startButton->setDefault(true);
     m_cancelButton = new QPushButton(QIcon::fromTheme(QStringLiteral("process-stop")), tr("Cancel"), central);
+    m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
+    m_quitButton->setToolTip(tr("Close Rsync GUI (during a transfer, asks first whether to cancel it)."));
     m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
     m_closeWhenFinishedCheck->setToolTip(tr("Quit Rsync GUI after a successful transfer. After errors, verification "
                                             "differences, cancelling or a dry run the window stays open."));
@@ -382,6 +384,7 @@ void MainWindow::buildUi()
     runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
     runRow->addWidget(m_cancelButton);
+    runRow->addWidget(m_quitButton);
     mainLayout->addLayout(runRow);
 
     m_currentFile = new ElidedLabel(central);
@@ -401,8 +404,15 @@ void MainWindow::buildUi()
     m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_log->setMinimumHeight(120);
     auto *clearLog = new QPushButton(tr("Clear log"), logPage);
+    m_logToFileCheck = new QCheckBox(tr("Save the log to a file"), logPage);
+    m_logToFileCheck->setToolTip(tr("Write the log of each run to a file in %1 (readable by you only).")
+                                     .arg(RunLog::defaultDirectory(QStringLiteral("rsync-gui"))));
+    auto *logButtons = new QHBoxLayout;
+    logButtons->addWidget(m_logToFileCheck);
+    logButtons->addStretch(1);
+    logButtons->addWidget(clearLog);
     logLayout->addWidget(m_log, 1);
-    logLayout->addWidget(clearLog, 0, Qt::AlignRight);
+    logLayout->addLayout(logButtons);
     m_tabs->addTab(logPage, QIcon::fromTheme(QStringLiteral("view-list-text")), tr("Log"));
 
     setCentralWidget(central);
@@ -440,6 +450,7 @@ void MainWindow::buildUi()
     connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportSettings);
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::startCopy);
     connect(m_cancelButton, &QPushButton::clicked, this, &MainWindow::cancelCopy);
+    connect(m_quitButton, &QPushButton::clicked, this, &QWidget::close); // closeEvent() asks during a transfer
     connect(clearLog, &QPushButton::clicked, m_log, &QPlainTextEdit::clear);
     // A window preference, not an rsync option: remembered right away, also in a preset (session-only) window.
     connect(m_closeWhenFinishedCheck, &QCheckBox::toggled, this, [](bool on) {
@@ -457,7 +468,7 @@ void MainWindow::buildUi()
     for (QCheckBox *box : {m_archiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
                            m_checksumCheck, m_partialCheck, m_verboseCheck, m_humanCheck, m_compressCheck,
                            m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck, m_removeSourceDirsCheck,
-                           m_dryRunCheck, m_verifyCheck, m_autoModifyWindowCheck}) {
+                           m_dryRunCheck, m_verifyCheck, m_autoModifyWindowCheck, m_logToFileCheck}) {
         connect(box, &QCheckBox::toggled, this, refresh);
     }
     for (QComboBox *combo : {m_existingCombo, m_progressCombo})
@@ -641,6 +652,7 @@ RsyncOptions MainWindow::currentOptions() const
     o.dryRun = m_dryRunCheck->isChecked();
     o.verifyAfter = m_verifyCheck->isChecked();
     o.autoModifyWindow = m_autoModifyWindowCheck->isChecked();
+    o.logToFile = m_logToFileCheck->isChecked();
     o.extraArguments = m_extraEdit->text().trimmed();
     return o;
 }
@@ -678,6 +690,7 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     m_dryRunCheck->setChecked(o.dryRun);
     m_verifyCheck->setChecked(o.verifyAfter);
     m_autoModifyWindowCheck->setChecked(o.autoModifyWindow);
+    m_logToFileCheck->setChecked(o.logToFile);
     m_extraEdit->setText(o.extraArguments);
     updatePreview();
     updateControls();
@@ -929,6 +942,7 @@ void MainWindow::updateControls()
     m_sourceBox->setEnabled(!running);
     m_destinationBox->setEnabled(!running);
     m_optionsBox->setEnabled(!running);
+    m_logToFileCheck->setEnabled(!running); // an option, decided at the start of a run
     if (m_importAction)
         m_importAction->setEnabled(!running);
     if (m_presetMenu)
@@ -1254,6 +1268,9 @@ void MainWindow::startCopy()
     });
     connect(m_job, &RsyncJob::finished, this, &MainWindow::onJobFinished);
 
+    QString logFileError;
+    if (options.logToFile)
+        m_runLog.open(RunLog::defaultDirectory(QStringLiteral("rsync-gui")), QDateTime::currentDateTime(), &logFileError);
     for (const QString &note : std::as_const(plan.notes))
         appendLog(RsyncJob::LogLevel::Warning, note);
     for (const QString &missing : std::as_const(plan.missing))
@@ -1261,6 +1278,10 @@ void MainWindow::startCopy()
     appendLogLines(RsyncJob::LogLevel::Info,
                    tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())),
                    true);
+    if (m_runLog.isOpen())
+        appendLog(RsyncJob::LogLevel::Info, tr("Log file: %1").arg(m_runLog.path()));
+    else if (options.logToFile)
+        appendLog(RsyncJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
     if (options.modifyWindow > 0) {
         appendLog(RsyncJob::LogLevel::Info,
                   tr("The destination keeps file times only to 2 seconds (FAT) - added --modify-window=%1, "
@@ -1381,10 +1402,13 @@ void MainWindow::appendLogLines(RsyncJob::LogLevel level, const QString &text, b
         m_log->appendHtml(timeHtml + (color.isEmpty() ? escaped
                                                       : QStringLiteral("<span style=\"color:%1\">%2</span>").arg(color, escaped)));
     }
+    m_runLog.write(now, text);
 }
 
 void MainWindow::onJobFinished()
 {
+    // The job has logged its summary.
+    m_runLog.close();
     const RsyncJob::Summary summary = m_job->summary();
     stopMeasuringSources();
     if (summary.ok())
@@ -1446,7 +1470,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
             event->ignore();
             return;
         }
+        appendLog(RsyncJob::LogLevel::Warning, tr("Cancelled: the window was closed."));
         delete m_job; // the destructor kills the rsync process
+        m_runLog.close();
     }
     stopMeasuringSources(); // quitting waits for running background tasks
     saveSettings();

@@ -77,6 +77,7 @@ constexpr BoolOption kBoolOptions[] = {
     {"useBwLimit", &RsyncOptions::useBwLimit},
     {"useRemoteShell", &RsyncOptions::useRemoteShell},
     {"autoModifyWindow", &RsyncOptions::autoModifyWindow},
+    {"logToFile", &RsyncOptions::logToFile},
 };
 
 struct StringOption

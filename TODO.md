@@ -49,6 +49,11 @@
       is matched against the directory listing (each U+FFFD stands for one or more bytes) - one match: the
       exact name, several: only they are listed in the built-in dialog to choose from;
       `FileListing::replacedBytesMatches` with tests
+- [x] Task manager progress: left to Plasma (the average of the jobs of the application)
+- [x] Current file cut at the start with "…", the status line at the end - they do not widen the window
+- [x] *Save the log to a file* under the log (an option like the others, on by default) - `RunLog`,
+      one file per run in `~/.local/state/rsync-gui/logs`
+- [x] *Quit* button next to *Copy* and *Cancel*
 
 ## To do
 

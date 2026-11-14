@@ -59,6 +59,8 @@ struct RsyncOptions
     QString extraArguments;    // split like a shell command line
     // Whether the window sets modifyWindow for FAT destinations (off: never added automatically).
     bool autoModifyWindow = true;
+    // Not an rsync option: the log of each run is also written to a file (see RunLog). On by default.
+    bool logToFile = true;
     // Not an option of the window and not saved: set for a run when the destination keeps file times
     // less precisely than rsync compares them (FAT: 2 s), see RsyncJob::modifyWindowFor().
     int modifyWindow = 0;      // --modify-window (with -t, unless given in extraArguments)

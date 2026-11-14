@@ -3,6 +3,7 @@
 #include "desktopprogress.h"
 #include "location.h"
 #include "rsyncjob.h"
+#include "runlog.h"
 #include "rsyncoptions.h"
 
 #include <QDate>
@@ -157,12 +158,15 @@ private:
     QLineEdit *m_previewEdit = nullptr;
     QPushButton *m_startButton = nullptr;
     QPushButton *m_cancelButton = nullptr;
+    QPushButton *m_quitButton = nullptr;
     QCheckBox *m_closeWhenFinishedCheck = nullptr;
     SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
     ElidedLabel *m_currentFile = nullptr;
     ElidedLabel *m_transferStatus = nullptr;
     QTabWidget *m_tabs = nullptr;
     QPlainTextEdit *m_log = nullptr;
+    QCheckBox *m_logToFileCheck = nullptr; // RsyncOptions::logToFile
+    RunLog m_runLog; // open while a run with logToFile goes on
 
     QPointer<RsyncJob> m_job;
     QDate m_logDate; // the date of the last log line - a new day gets a line of its own
