@@ -12,6 +12,10 @@ class RunLog
 public:
     // <XDG_STATE_HOME, usually ~/.local/state>/<appName>/logs
     static QString defaultDirectory(const QString &appName);
+    // A directory or file for showing: the home directory as "~".
+    static QString displayDirectory(const QString &directory);
+    // Creates the directory (readable by the user only) if needed.
+    static bool makeDirectory(const QString &directory);
 
     bool open(const QString &directory, const QDateTime &start, QString *error = nullptr);
     bool isOpen() const { return m_file.isOpen(); }

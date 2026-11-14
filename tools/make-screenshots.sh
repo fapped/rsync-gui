@@ -13,6 +13,10 @@ build="$repo/build-screenshots"
 demo=/tmp/rsync-gui-demo
 config=$(mktemp -d)
 trap 'rm -rf -- "$config"' EXIT
+# A home directory of its own: the log files (XDG_STATE_HOME) are not written to the user's, and the
+# window shows ~/... instead of the user's paths. The places of the file dialog exist in it.
+home="$config/home"
+mkdir -p "$home/Desktop" "$home/Documents" "$home/Downloads" "$home/Pictures"
 
 cmake -S "$repo/tools/screenshots" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null
 cmake --build "$build" > /dev/null
@@ -40,7 +44,7 @@ mkdir -p "$repo/docs/screenshots"
 # Only the presets of the repository (next to the executable), not the user's own ones; English number
 # and date formats, whatever the locale of the user.
 SCREENSHOT_DIR="$repo/docs/screenshots" SCREENSHOT_NAMES_DIR="$names" \
-    XDG_CONFIG_HOME="$config" XDG_DATA_HOME="$config/data" \
+    HOME="$home" XDG_CONFIG_HOME="$config" XDG_DATA_HOME="$config/data" XDG_STATE_HOME="$home/.local/state" \
     QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=kde QT_STYLE_OVERRIDE=Breeze \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
     LC_ALL=en_US.UTF-8 \

@@ -11,6 +11,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -407,8 +408,24 @@ void MainWindow::buildUi()
     m_logToFileCheck = new QCheckBox(tr("Save the log to a file"), logPage);
     m_logToFileCheck->setToolTip(tr("Write the log of each run to a file in %1 (readable by you only).")
                                      .arg(RunLog::defaultDirectory(QStringLiteral("rsync-gui"))));
+    // The directory of the log files next to the checkbox - a link that opens it in the file manager.
+    const QString logDirectory = RunLog::defaultDirectory(QStringLiteral("rsync-gui"));
+    auto *logDirectoryLabel = new QLabel(QStringLiteral("<a href=\"%1\">%2</a>")
+                                             .arg(QUrl::fromLocalFile(logDirectory).toString().toHtmlEscaped(),
+                                                  RunLog::displayDirectory(logDirectory).toHtmlEscaped()),
+                                         m_logToFileCheck->parentWidget());
+    logDirectoryLabel->setTextFormat(Qt::RichText);
+    logDirectoryLabel->setToolTip(tr("Open the directory of the log files (created if it does not exist yet)."));
+    connect(logDirectoryLabel, &QLabel::linkActivated, this, [this, logDirectory] {
+        if (!RunLog::makeDirectory(logDirectory) || !QDesktopServices::openUrl(QUrl::fromLocalFile(logDirectory)))
+            appendLog(RsyncJob::LogLevel::Warning, tr("Cannot open %1").arg(logDirectory));
+    });
+    // Greyed out while the log is not saved.
+    logDirectoryLabel->setEnabled(m_logToFileCheck->isChecked());
+    connect(m_logToFileCheck, &QCheckBox::toggled, logDirectoryLabel, &QWidget::setEnabled);
     auto *logButtons = new QHBoxLayout;
     logButtons->addWidget(m_logToFileCheck);
+    logButtons->addWidget(logDirectoryLabel);
     logButtons->addStretch(1);
     logButtons->addWidget(clearLog);
     logLayout->addWidget(m_log, 1);
@@ -1279,7 +1296,7 @@ void MainWindow::startCopy()
                    tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())),
                    true);
     if (m_runLog.isOpen())
-        appendLog(RsyncJob::LogLevel::Info, tr("Log file: %1").arg(m_runLog.path()));
+        appendLog(RsyncJob::LogLevel::Info, tr("Log file: %1").arg(RunLog::displayDirectory(m_runLog.path())));
     else if (options.logToFile)
         appendLog(RsyncJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
     if (options.modifyWindow > 0) {

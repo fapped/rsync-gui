@@ -3,6 +3,7 @@
 #include "location.h"
 #include "rsyncjob.h"
 #include "rsyncoptions.h"
+#include "runlog.h"
 #include "speedhistory.h"
 
 #include <QDir>
@@ -257,6 +258,7 @@ private slots:
     void localTotalSize();
     void copyNonUtf8Names();
     void jsonRoundTrip();
+    void runLogDirectory();
     void jsonMissingKeysKeepBase();
     void jsonRejectsInvalidValues_data();
     void jsonRejectsInvalidValues();
@@ -1192,6 +1194,25 @@ void TestRsyncCore::missingProgramAborts()
     QVERIFY(runJob(job));
     QVERIFY(job.summary().aborted);
     QVERIFY(!job.summary().ok());
+}
+
+void TestRsyncCore::runLogDirectory()
+{
+    QVERIFY(RunLog::defaultDirectory(QStringLiteral("rsync-gui")).endsWith(QStringLiteral("/rsync-gui/logs")));
+    const QString home = QDir::homePath();
+    QCOMPARE(RunLog::displayDirectory(home + QStringLiteral("/.local/state/rsync-gui/logs")),
+             QStringLiteral("~/.local/state/rsync-gui/logs"));
+    QCOMPARE(RunLog::displayDirectory(home + QStringLiteral("x/logs")), home + QStringLiteral("x/logs"));
+
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString dir = tmp.filePath(QStringLiteral("a/b/logs"));
+    QVERIFY(RunLog::makeDirectory(dir));
+    QCOMPARE(QFile::permissions(dir) & (QFileDevice::ReadGroup | QFileDevice::ReadOther), QFileDevice::Permissions());
+    RunLog log;
+    QString error;
+    QVERIFY2(log.open(dir, QDateTime(QDate(2026, 11, 14), QTime(12, 0)), &error), qPrintable(error));
+    QCOMPARE(log.path(), dir + QStringLiteral("/2026-11-14_12-00-00.log"));
 }
 
 void TestRsyncCore::jsonRoundTrip()

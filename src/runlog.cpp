@@ -9,15 +9,32 @@ QString RunLog::defaultDirectory(const QString &appName)
         + QStringLiteral("/logs");
 }
 
+QString RunLog::displayDirectory(const QString &directory)
+{
+    const QString home = QDir::homePath();
+    if (directory == home)
+        return QStringLiteral("~");
+    if (directory.startsWith(home + QLatin1Char('/')))
+        return QLatin1Char('~') + directory.mid(home.size());
+    return directory;
+}
+
+bool RunLog::makeDirectory(const QString &directory)
+{
+    if (!QDir().mkpath(directory))
+        return false;
+    QFile::setPermissions(directory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return true;
+}
+
 bool RunLog::open(const QString &directory, const QDateTime &start, QString *error)
 {
     close();
-    if (!QDir().mkpath(directory)) {
+    if (!makeDirectory(directory)) {
         if (error)
             *error = QObject::tr("Cannot create the directory \"%1\".").arg(directory);
         return false;
     }
-    QFile::setPermissions(directory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     const QString base = directory + QLatin1Char('/') + start.toString(QStringLiteral("yyyy-MM-dd_HH-mm-ss"));
     for (int n = 1; n < 1000; ++n) {
         const QString path = n == 1 ? base + QStringLiteral(".log") : QStringLiteral("%1_%2.log").arg(base).arg(n);
