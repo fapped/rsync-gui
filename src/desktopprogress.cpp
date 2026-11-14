@@ -70,7 +70,9 @@ void DesktopProgress::start(const QString &title, const QString &source, const Q
     };
     if (!destinationUrl.isEmpty())
         m_pending.insert(QStringLiteral("destUrl"), destinationUrl);
-    sendLauncherEntry(0.0, true);
+    // The task manager entry waits for the reply to requestView(): with a job view Plasma shows the jobs
+    // on the task manager itself, without one this instance does.
+    m_ownLauncherEntry = false;
 
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
@@ -85,11 +87,17 @@ void DesktopProgress::start(const QString &title, const QString &source, const Q
         m_requestPending = false;
         const QDBusPendingReply<QDBusObjectPath> reply = *call;
         if (reply.isError() || !m_active) {
-            // No job view server (not Plasma) - the task manager progress still works.
-            if (m_finishPending)
+            // No job view server (not Plasma) - the task manager progress is shown by this instance.
+            if (m_finishPending) {
                 m_active = false;
+            } else if (m_active) {
+                m_ownLauncherEntry = true;
+                sendLauncherEntry(m_progress, true);
+            }
             return;
         }
+        // Plasma forwards the progress of the jobs to the task manager itself (the average of the
+        // application's jobs, with their count) - a second value from here would fight with it.
         // The job views live on the connection that owns the server name (the reply's sender is not
         // available here), so the well-known name is used for them too.
         m_jobService = kJobServer;
@@ -230,6 +238,8 @@ void DesktopProgress::sendUpdate(const QVariantMap &properties)
 
 void DesktopProgress::sendLauncherEntry(double progress, bool visible)
 {
+    if (!m_ownLauncherEntry)
+        return;
     QDBusMessage signal = QDBusMessage::createSignal(kLauncherPath, kLauncherInterface, QStringLiteral("Update"));
     signal << m_appUri
            << QVariantMap{{QStringLiteral("progress"), progress}, {QStringLiteral("progress-visible"), visible}};
