@@ -360,6 +360,7 @@ void RsyncJob::start()
     m_index = 0;
     m_phase = Phase::Copy;
     m_bytesBefore = 0;
+    m_filesBefore = {};
     m_summary = {};
     m_differingFiles.clear();
     m_cancelRequested = false;
@@ -427,6 +428,8 @@ void RsyncJob::startProcess()
     m_pending.clear();
     m_lastDone = 0;
     m_lastTotal = 0;
+    m_lastTotalFinal = false;
+    m_lastTransferred = 0;
     m_humanLevel = humanLevel(args);
     m_completedBytes = 0;
     m_processedBytes = 0;
@@ -507,7 +510,18 @@ void RsyncJob::handleLine(const QString &rawLine)
         double fraction = 0.0;
         if (info.total > 0) {
             m_lastTotal = info.total;
-            m_lastDone = info.total - info.remaining;
+            // Not monotonic in rsync's output ("to-chk=3/5", "to-chk=1/5", "to-chk=2/5"): keep the highest.
+            m_lastDone = qMax(m_lastDone, info.total - info.remaining);
+            m_lastTotalFinal = info.totalFinal;
+        }
+        if (m_phase == Phase::Copy && (info.total > 0 || info.transferNumber > 0)) {
+            m_lastTransferred = qMax(m_lastTransferred, info.transferNumber);
+            FileCount count = m_filesBefore;
+            count.checked += m_lastDone;
+            count.total += m_lastTotal;
+            count.transferred += m_lastTransferred;
+            count.totalFinal = m_lastTotalFinal && m_index + 1 >= m_transfers.size();
+            emit filesChanged(count);
         }
         if (m_options.progress == RsyncOptions::Progress::Overall) {
             fraction = info.percent / 100.0;
@@ -520,12 +534,8 @@ void RsyncJob::handleLine(const QString &rawLine)
         }
         emitProgress(qBound(0.0, fraction, 1.0));
 
-        QString status = tr("%1%  %2  %3  ETA %4").arg(info.percent).arg(info.transferred, info.rate, info.eta);
-        if (info.total > 0) {
-            status += info.totalFinal ? tr("  files: %1/%2").arg(info.total - info.remaining).arg(info.total)
-                                      : tr("  files: %1/%2+").arg(info.total - info.remaining).arg(info.total);
-        }
-        emit statusChanged(status);
+        // (The file counts are reported by filesChanged().)
+        emit statusChanged(tr("%1%  %2  %3  ETA %4").arg(info.percent).arg(info.transferred, info.rate, info.eta));
         return;
     }
 
@@ -574,6 +584,14 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     if (m_phase == Phase::Copy) {
         m_bytesBefore += m_processedBytes;
         m_processedBytes = 0;
+        m_filesBefore.checked += m_lastDone;
+        m_filesBefore.total += m_lastTotal;
+        m_filesBefore.transferred += m_lastTransferred;
+        m_filesBefore.totalFinal = m_lastTotalFinal && m_index + 1 >= m_transfers.size();
+        m_lastDone = m_lastTotal = m_lastTransferred = 0;
+        m_lastTotalFinal = false;
+        if (!m_filesBefore.isEmpty())
+            emit filesChanged(m_filesBefore);
         bool runVerify = false;
         if (m_cancelRequested) {
             ++m_summary.transfersFailed;
@@ -924,4 +942,17 @@ void RsyncJob::emitProgress(double currentFraction)
         return;
     const qsizetype done = m_index * m_stepsPerTransfer + (m_phase == Phase::Verify ? 1 : m_phase == Phase::Remove ? 2 : 0);
     emit progress(int(1000.0 * (done + currentFraction) / total));
+}
+
+QString RsyncJob::fileCountText(const FileCount &count)
+{
+    if (count.isEmpty())
+        return {};
+    const QString more = count.totalFinal ? QString() : QStringLiteral("+");
+    return tr("Checked: %L1 / %L2%3 (%L4%3 left) \u00b7 transferred: %L5")
+        .arg(count.checked)
+        .arg(count.total)
+        .arg(more)
+        .arg(qMax<qint64>(0, count.total - count.checked))
+        .arg(count.transferred);
 }

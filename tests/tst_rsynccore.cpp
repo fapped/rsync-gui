@@ -239,6 +239,7 @@ private slots:
     void humanLevel();
     void processedBytes_data();
     void processedBytes();
+    void fileCountText();
     void parseDifference_data();
     void parseDifference();
     void copyLocal();
@@ -743,14 +744,44 @@ void TestRsyncCore::processedBytes()
     options.human = human;
     RsyncJob job(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
     QSignalSpy rates(&job, &RsyncJob::transferRateChanged);
+    QList<RsyncJob::FileCount> files;
+    connect(&job, &RsyncJob::filesChanged, this, [&files](const RsyncJob::FileCount &count) { files << count; });
     QVERIFY(runJob(job));
     QVERIFY(job.summary().ok());
     QVERIFY(!rates.isEmpty());
+    // "src", "src/a", "src/c", "src/sub", "src/sub/b" - three of them files that were copied.
+    QVERIFY(!files.isEmpty());
+    QCOMPARE(files.constLast().checked, 5);
+    QCOMPARE(files.constLast().total, 5);
+    QVERIFY(files.constLast().totalFinal);
+    QCOMPARE(files.constLast().transferred, 3);
+    for (qsizetype i = 1; i < files.size(); ++i) {
+        QVERIFY(files.at(i).checked >= files.at(i - 1).checked);
+        QVERIFY(files.at(i).transferred >= files.at(i - 1).transferred);
+    }
     const qint64 processed = rates.last().at(1).toLongLong();
     // -h rounds to 3 significant digits ("600K").
     QVERIFY2(qAbs(processed - 600000) <= (human ? 5000 : 0), qPrintable(QString::number(processed)));
     for (const QList<QVariant> &args : std::as_const(rates))
         QVERIFY(args.at(0).toLongLong() >= 0);
+}
+
+void TestRsyncCore::fileCountText()
+{
+    const QLocale previous;
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+    const auto restore = qScopeGuard([&previous] { QLocale::setDefault(previous); });
+    QCOMPARE(RsyncJob::fileCountText({}), QString());
+    RsyncJob::FileCount count;
+    count.checked = 1200;
+    count.total = 5000;
+    count.transferred = 340;
+    const QString growing = RsyncJob::fileCountText(count);
+    QVERIFY2(growing.contains(QStringLiteral("5,000+")) && growing.contains(QStringLiteral("3,800+ left"))
+                 && growing.endsWith(QStringLiteral("340")),
+             qPrintable(growing));
+    count.totalFinal = true;
+    QVERIFY(!RsyncJob::fileCountText(count).contains(QLatin1Char('+')));
 }
 
 void TestRsyncCore::parseDifference_data()

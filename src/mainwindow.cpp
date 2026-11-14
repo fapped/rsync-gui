@@ -393,8 +393,17 @@ void MainWindow::buildUi()
     m_transferStatus = new ElidedLabel(central);
     m_transferStatus->setElideMode(Qt::ElideRight); // the amount and the percentage come first
     m_transferStatus->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_fileCount = new QLabel(this);
+    m_fileCount->setToolTip(tr("Entries rsync has checked of those it found so far (directories and files that are up "
+                               "to date count too) and the files it actually transferred. A \"+\" means the total "
+                               "is not final yet: rsync is still scanning, or more transfers follow."));
     mainLayout->addWidget(m_currentFile);
     mainLayout->addWidget(m_transferStatus);
+    // The status bar: the result of the last run on the left (hidden while a message is shown there, e.g. an
+    // invalid option), the file counter on the right.
+    m_resultLabel = new QLabel(this);
+    statusBar()->addWidget(m_resultLabel, 1);
+    statusBar()->addPermanentWidget(m_fileCount);
 
     // --- Log ---
     auto *logPage = new QWidget(m_tabs);
@@ -1281,6 +1290,11 @@ void MainWindow::startCopy()
     connect(m_job, &RsyncJob::statusChanged, m_transferStatus, [this](const QString &status) {
         m_transferStatus->setText(status);
     });
+    m_fileCount->clear();
+    m_resultLabel->clear();
+    connect(m_job, &RsyncJob::filesChanged, m_fileCount, [this](const RsyncJob::FileCount &count) {
+        m_fileCount->setText(RsyncJob::fileCountText(count));
+    });
     connect(m_job, &RsyncJob::finished, this, &MainWindow::onJobFinished);
 
     QString logFileError;
@@ -1326,10 +1340,23 @@ void MainWindow::startDesktopProgress(const RsyncOptions &options, const Locatio
     const QString title = options.dryRun ? tr("Dry run") : options.removeSourceFiles ? tr("Moving") : tr("Copying");
     m_desktopProgress->start(title, source, LocalPath::display(dest.toString()), destUrl);
     connect(m_job, &RsyncJob::progress, m_desktopProgress, &DesktopProgress::setProgress);
-    connect(m_job, &RsyncJob::statusChanged, m_desktopProgress, [this](QString status) {
-        // Plasma shows the percentage itself; keep the size, speed and ETA.
+    // Plasma shows the percentage itself; keep the size, speed, ETA and the file counts.
+    auto fileCount = std::make_shared<QString>();
+    auto updateInfo = [this, fileCount] {
         static const QRegularExpression percent(QStringLiteral("^\\d+%\\s*"));
-        m_desktopProgress->setInfo(status.remove(percent));
+        QString info = QString(m_transferStatusText).remove(percent);
+        if (!fileCount->isEmpty())
+            info += (info.isEmpty() ? QString() : QStringLiteral("  ")) + *fileCount;
+        m_desktopProgress->setInfo(info);
+    };
+    m_transferStatusText.clear();
+    connect(m_job, &RsyncJob::statusChanged, m_desktopProgress, [this, updateInfo](const QString &status) {
+        m_transferStatusText = status;
+        updateInfo();
+    });
+    connect(m_job, &RsyncJob::filesChanged, m_desktopProgress, [fileCount, updateInfo](const RsyncJob::FileCount &count) {
+        *fileCount = RsyncJob::fileCountText(count);
+        updateInfo();
     });
     connect(m_job, &RsyncJob::transferRateChanged, m_desktopProgress, &DesktopProgress::setSpeed);
     measureSourcesForDesktopProgress(options);
@@ -1437,6 +1464,7 @@ void MainWindow::onJobFinished()
     m_progress->stop();
     m_progress->setRange(0, 1000);
     m_transferStatus->clear();
+    m_currentFile->clear();
     // After a move, sources that no longer exist were transferred and removed - drop them from the list.
     if (currentOptions().removeSourceFiles && !currentOptions().dryRun) {
         for (int i = m_sourceList->count() - 1; i >= 0; --i) {
@@ -1448,18 +1476,18 @@ void MainWindow::onJobFinished()
     refreshSources();
     if (summary.ok() && m_closeWhenFinishedCheck->isChecked() && !m_job->options().dryRun) {
         // A short moment to see the result; unchecking the box in the meantime keeps the window open.
-        m_currentFile->setText(tr("Finished successfully. Closing..."));
+        m_resultLabel->setText(tr("Finished successfully. Closing..."));
         QTimer::singleShot(1500, this, [this] {
             if (m_closeWhenFinishedCheck->isChecked() && !(m_job && m_job->isRunning()))
                 close();
         });
     } else if (summary.ok()) {
-        m_currentFile->setText(tr("Finished successfully."));
-        statusBar()->showMessage(tr("Finished successfully."), 10000);
+        m_resultLabel->setText(m_job->options().dryRun ? tr("Dry run finished - nothing was changed.")
+                                                       : tr("Finished successfully."));
     } else if (summary.cancelled) {
-        m_currentFile->setText(tr("Cancelled."));
+        m_resultLabel->setText(tr("Cancelled."));
     } else if (summary.differences > 0) {
-        m_currentFile->setText(tr("Verification found differences."));
+        m_resultLabel->setText(tr("Verification found differences: %L1.").arg(summary.differences));
         QMessageBox box(QMessageBox::Warning, tr("Verification failed"),
                         tr("%1 entr(y/ies) in the destination differ from the source or are missing. "
                            "See the log for details.")
@@ -1468,7 +1496,7 @@ void MainWindow::onJobFinished()
         box.setDetailedText(m_job->differingFiles().mid(0, 1000).join(QLatin1Char('\n')));
         box.exec();
     } else {
-        m_currentFile->setText(tr("Finished with errors."));
+        m_resultLabel->setText(tr("Finished with errors."));
         QMessageBox::warning(this, tr("Finished with errors"),
                              tr("Not everything could be copied. See the log for details."));
     }

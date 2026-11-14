@@ -23,7 +23,7 @@ be passed as additional arguments.
 - **verification after copying**: a second rsync pass that compares checksums of the source and the
   destination and lists every file that differs or is missing,
 - preview of the generated command, progress bar (per file or overall) with a live **speed graph**
-  behind it, speed and ETA, a log with the time of every line (the date in the line that starts
+  behind it, speed and ETA, the result of the last run and a **file counter** in the status bar (see below), a log with the time of every line (the date in the line that starts
   a run and when the day changes),
   cancellation, confirmation only for options that delete files, optional **closing the window
   when the transfer finishes** successfully,
@@ -210,6 +210,18 @@ the time since the start (at least 10 seconds while running, the whole job after
 of the graph is the speed in its top left corner. Verification and removing the sources report no
 speed, so the graph has a gap there. The graph of the last job stays until the next one starts
 (see the screenshot of the log after copying below).
+
+## File counter
+
+On the right of the status bar the window shows what rsync reports about the file list, summed over all
+transfers of the job, e.g. *Checked: 1,200 / 5,000+ (3,800+ left) · transferred: 340*:
+
+- *checked* counts every entry of the file list - directories too, and files that are up to date and
+  not copied; *transferred* counts the files rsync actually copied,
+- a **+** means the total is not final yet: rsync builds the file list while copying (incremental
+  recursion) and adds to it as it goes, or more transfers follow,
+- with *Progress: None* and in a dry run rsync reports nothing, so there is no counter; with per-file
+  progress rsync prints nothing for a transfer in which everything is up to date either.
 
 ## Progress outside the window
 

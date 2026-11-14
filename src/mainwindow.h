@@ -163,6 +163,9 @@ private:
     SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
     ElidedLabel *m_currentFile = nullptr;
     ElidedLabel *m_transferStatus = nullptr;
+    QLabel *m_fileCount = nullptr;   // in the status bar
+    QLabel *m_resultLabel = nullptr; // the result of the last run, in the status bar
+    QString m_transferStatusText; // the last status of the job, for the desktop notification
     QTabWidget *m_tabs = nullptr;
     QPlainTextEdit *m_log = nullptr;
     QCheckBox *m_logToFileCheck = nullptr; // RsyncOptions::logToFile

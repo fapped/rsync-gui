@@ -59,6 +59,27 @@ public:
         qint64 bytesPerSecond = -1; // `rate` in bytes per second
     };
 
+    // The entries of the copy passes so far (all transfers of the job), from rsync's progress output
+    // ("xfr#N, to-chk=R/T"). rsync counts every entry of the file list (directories too), also those it
+    // skips because they are up to date. With incremental recursion (the default) the file list is still
+    // growing and `total` is not final yet; neither is it while more transfers follow.
+    struct FileCount
+    {
+        qint64 checked = 0;
+        qint64 total = 0;
+        bool totalFinal = false;
+        qint64 transferred = 0; // the files rsync actually copied
+
+        bool isEmpty() const { return total == 0 && checked == 0 && transferred == 0; }
+        bool operator==(const FileCount &other) const
+        {
+            return checked == other.checked && total == other.total && totalFinal == other.totalFinal
+                && transferred == other.transferred;
+        }
+    };
+    // E.g. "Checked: 1,200 / 5,000+ (3,800+ left) · transferred: 340"; empty if nothing has been reported.
+    static QString fileCountText(const FileCount &count);
+
     struct Summary
     {
         int transfersOk = 0;
@@ -139,6 +160,7 @@ signals:
     void progress(int permille);
     void statusChanged(const QString &text); // speed, ETA etc. of the running transfer
     void currentFileChanged(const QString &path);
+    void filesChanged(const RsyncJob::FileCount &count);
     // Speed and the bytes copied so far (all transfers of the job), from rsync's progress output.
     void transferRateChanged(qint64 bytesPerSecond, qint64 processedBytes);
     void phaseChanged(const QString &text);
@@ -178,6 +200,9 @@ private:
     int m_lastTransferNumber = 0;
     int m_lastDone = 0;  // files checked so far, from the last "to-chk" report
     int m_lastTotal = 0;
+    bool m_lastTotalFinal = false;
+    int m_lastTransferred = 0; // the highest "xfr#N" of the running copy pass
+    FileCount m_filesBefore;   // the finished copy passes
     bool m_running = false;
     bool m_cancelRequested = false;
     std::shared_ptr<std::atomic<bool>> m_dropCancel; // set while the page cache is being dropped
