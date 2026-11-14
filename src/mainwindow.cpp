@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "elidedlabel.h"
 #include "filedialog.h"
 #include "filelisting.h"
 #include "localpath.h"
@@ -383,10 +384,10 @@ void MainWindow::buildUi()
     runRow->addWidget(m_cancelButton);
     mainLayout->addLayout(runRow);
 
-    m_currentFile = new QLabel(central);
+    m_currentFile = new ElidedLabel(central);
     m_currentFile->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_currentFile->setTextFormat(Qt::PlainText);
-    m_transferStatus = new QLabel(central);
+    m_transferStatus = new ElidedLabel(central);
+    m_transferStatus->setElideMode(Qt::ElideRight); // the amount and the percentage come first
     m_transferStatus->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     mainLayout->addWidget(m_currentFile);
     mainLayout->addWidget(m_transferStatus);
@@ -1248,7 +1249,9 @@ void MainWindow::startCopy()
         if (!phase.isEmpty())
             m_currentFile->setText(phase + QStringLiteral("..."));
     });
-    connect(m_job, &RsyncJob::statusChanged, m_transferStatus, &QLabel::setText);
+    connect(m_job, &RsyncJob::statusChanged, m_transferStatus, [this](const QString &status) {
+        m_transferStatus->setText(status);
+    });
     connect(m_job, &RsyncJob::finished, this, &MainWindow::onJobFinished);
 
     for (const QString &note : std::as_const(plan.notes))

@@ -16,6 +16,7 @@ class QAction;
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class ElidedLabel;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -158,8 +159,8 @@ private:
     QPushButton *m_cancelButton = nullptr;
     QCheckBox *m_closeWhenFinishedCheck = nullptr;
     SpeedGraph *m_progress = nullptr; // the progress bar with the speed graph
-    QLabel *m_currentFile = nullptr;
-    QLabel *m_transferStatus = nullptr;
+    ElidedLabel *m_currentFile = nullptr;
+    ElidedLabel *m_transferStatus = nullptr;
     QTabWidget *m_tabs = nullptr;
     QPlainTextEdit *m_log = nullptr;
 
