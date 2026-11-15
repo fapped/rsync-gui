@@ -41,6 +41,8 @@ public:
         // Options for this transfer only, after those of RsyncOptions (copy and removal passes), e.g. the --chmod of
         // a network share reached over ssh.
         QStringList extraArguments;
+        // The sources and the destination are local: rsync gets no remote shell (-e), which it would not use.
+        bool local = false;
 
         bool runsOnServer() const { return !host.isEmpty(); }
     };

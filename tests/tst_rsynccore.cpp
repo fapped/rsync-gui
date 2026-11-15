@@ -859,6 +859,24 @@ void TestRsyncCore::sshSharing()
     QVERIFY(!a.toJson().contains("sshControlPath"));
     QVERIFY(!RsyncOptions::defaultSshControlPath().isEmpty() || qEnvironmentVariableIsEmpty("XDG_RUNTIME_DIR"));
 
+    // Local transfers get no remote shell (it would only clutter the command); remote ones keep it.
+    RsyncOptions shared;
+    shared.sshControlPath = QStringLiteral("/run/x/ssh-%C");
+    shared.verifyAfter = true;
+    RsyncJob::Plan local = RsyncJob::plan({Location::parse(QStringLiteral("/tmp"))}, Location::parse(QStringLiteral("/var/tmp")),
+                                          shared);
+    QCOMPARE(local.transfers.size(), 1);
+    QVERIFY(local.transfers.first().local);
+    for (const RsyncJob::Pass pass : {RsyncJob::Pass::Copy, RsyncJob::Pass::Verify, RsyncJob::Pass::Remove})
+        QVERIFY(!RsyncJob::rsyncArguments(local.transfers.first(), shared, pass).contains(QStringLiteral("-e")));
+    RsyncJob::Plan push = RsyncJob::plan({Location::parse(QStringLiteral("/tmp"))},
+                                         Location::parse(QStringLiteral("shareuser@10.0.0.6:/backup")), shared);
+    QVERIFY(!push.transfers.first().local);
+    QVERIFY(RsyncJob::rsyncArguments(push.transfers.first(), shared, RsyncJob::Pass::Copy).contains(QStringLiteral("-e")));
+    RsyncJob::Plan pull = RsyncJob::plan({Location::parse(QStringLiteral("shareuser@10.0.0.6:/data"))},
+                                         Location::parse(QStringLiteral("/var/tmp")), shared);
+    QVERIFY(!pull.transfers.first().local);
+
     // The destination is created on the server before the copy (and only then).
     RsyncJob::Transfer t;
     t.host = QStringLiteral("h");

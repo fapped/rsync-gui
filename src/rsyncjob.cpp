@@ -160,8 +160,10 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
                 transfer.host = source.user.isEmpty() ? source.host : source.user + QLatin1Char('@') + source.host;
                 transfer.description = source.port > 0 ? tr("on %1 (port %2)").arg(source.host).arg(source.port)
                                                        : tr("on %1").arg(source.host);
-            } else if (!source.isRemote())
+            } else if (!source.isRemote()) {
                 transfer.description = tr("local files");
+                transfer.local = !destination.isRemote();
+            }
             else if (source.port > 0)
                 transfer.description = tr("from %1 (port %2)").arg(source.host).arg(source.port);
             else
@@ -468,8 +470,8 @@ void RsyncJob::startNext()
 
 QStringList RsyncJob::rsyncArguments(const Transfer &transfer, const RsyncOptions &options, Pass pass)
 {
-    // On the server rsync copies between its own paths: no remote shell for it.
-    const int port = transfer.runsOnServer() ? RsyncOptions::NoRemoteShell : transfer.port;
+    // On the server rsync copies between its own paths, and locally between local ones: no remote shell for it.
+    const int port = transfer.runsOnServer() || transfer.local ? RsyncOptions::NoRemoteShell : transfer.port;
     switch (pass) {
     case Pass::Copy: return options.arguments(port) + transfer.extraArguments;
     case Pass::Verify: return options.verifyArguments(port);
