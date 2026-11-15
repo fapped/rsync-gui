@@ -2480,7 +2480,6 @@ void TestRsyncCore::deleteJobDuringCacheDrop()
         QPointer<RsyncJob> guard = job;
         bool finished = false;
         int during = -1;
-        int after = -1;
         connect(job, &RsyncJob::finished, this, [&finished] { finished = true; });
         connect(job, &RsyncJob::phaseChanged, this, [&, job](const QString &phase) {
             if (phase != QLatin1String("Writing to the disk"))
@@ -2488,14 +2487,15 @@ void TestRsyncCore::deleteJobDuringCacheDrop()
             QTimer::singleShot(0, job, [&, job] {
                 during = dropThreads();
                 delete job;
-                after = dropThreads(); // the thread has ended, not just been left behind
             });
         });
         job->start();
         QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 60000);
         QTest::qWait(200); // a queued call from the thread would arrive now
         QVERIFY(!finished);
-        QCOMPARE(after, 0);
+        // The thread has ended, it was not left behind. QThread::wait() in the destructor returns when the thread's
+        // function is done; the system thread itself exits a moment later (it is still in /proc right after).
+        QTRY_COMPARE_WITH_TIMEOUT(dropThreads(), 0, 2000);
         if (during == 1)
             return; // deleted while the thread was running
         QCOMPARE(during, 0); // done before the delete: try with more files
