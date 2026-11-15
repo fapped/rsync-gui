@@ -54,6 +54,11 @@
 - [x] *Save the log to a file* under the log (an option like the others, on by default) - `RunLog`,
       one file per run in `~/.local/state/rsync-gui/logs`
 - [x] *Quit* button next to *Copy* and *Cancel*
+- [x] Checks on the server before running there (RemoteProbe: commands allowed, rsync, sources, destination,
+      free space, real paths), `mkdir -p` of the destination, removing emptied source directories there, `du`
+      over ssh for the speed graph, one ssh login per job (`ControlMaster`)
+- [x] Network shares: CIFS/sshfs mounts from `/proc/self/mountinfo`, per-share settings (*File → Network
+      shares…*, offered on first use), copies routed over ssh / on the server (`ShareRouting`)
 - [x] rsync on the server for sources and a destination on the same remote host (`sftp://`, `host:path`):
       `ssh host 'rsync ...'`, arguments quoted for a POSIX shell (also names that are not valid UTF-8),
       cancelling by the PID of the remote rsync, option *Run on the server* (step 1 of docs/plan-server-side.md)
@@ -64,21 +69,11 @@
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
-- [ ] Run rsync on the server when the source and the destination are on the same host, so the data does not
-      go through this computer (`ssh host rsync SRC DST`). Today two remote locations are rejected, and a copy
-      between two directories of a mounted network share (CIFS, sshfs) reads and writes everything over the network:
-  - [ ] Mounted shares from `/proc/self/mountinfo`: sshfs gives `host:/path` directly; CIFS gives `//host/share`,
-        the path of the share on the server read once with `ssh host testparm -s --section-name=SHARE
-        --parameter-name=path` (Samba), remembered and editable in the settings
-  - [ ] Choosing the transfer: both on the same host → rsync on the server with the server's paths; one side
-        local → rsync over ssh instead of through the mount (delta transfer, times and permissions kept);
-        otherwise through the mount as now, with a warning that the data crosses the network twice
-  - [ ] One ssh login per job (`ControlMaster`): with a password, the cancel kill asks again today
-  - [ ] Checks done over ssh: sources exist, the destination is not inside a source, free space (`df`),
-        total size for the progress and the graph (`du`); removing emptied source directories after a move
-  - [ ] Files are created by the ssh user, not by Samba: warn when the share uses `force user` / `force group`,
-        or a different user; optionally `--chmod` from `create mask` / `directory mask`; the ssh user needs a shell
-  - [ ] Tests: `tools/ssh-test` container extended with Samba (mounting CIFS needs root - checked by hand)
+- [ ] Run rsync on the server / use ssh for network shares (docs/plan-server-side.md, steps 1-6 done 2026-11-15):
+  - [ ] Checked by hand with the user's NAS: a CIFS share set up with *Detect* (testparm), a copy within a share
+        on the server, local -> share over ssh, the ownership note (`force user` / masks)
+  - [ ] Optionally `--chmod` from Samba's `create mask` / `directory mask` for copies over ssh to a share
+  - [ ] Tests: a Samba share in the `tools/ssh-test` container for *Detect* (testparm; mounting CIFS needs root)
   - [ ] Tests with real sftp servers (by hand, with the user):
     - [ ] an account for sftp only (`ForceCommand internal-sftp`): the clear "did not run the command" error
           (checked once on 2026-11-15), and from step 2 on: detected by the probe before anything starts

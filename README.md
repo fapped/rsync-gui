@@ -16,8 +16,8 @@ be passed as additional arguments.
 - **destination**: a local directory (created if missing) or a remote one, with a list of
   recently used destinations,
 - **copying on the server**: sources and a destination on the same host (e.g. two `sftp://`
-  locations of one server in Dolphin) are copied by rsync running there, over ssh - the data does not
-  go through this computer (see below),
+  locations of one server in Dolphin, or two directories of a mounted CIFS/sshfs share set up for it) are
+  copied by rsync running there, over ssh - the data does not go through this computer (see below),
 - the most useful **rsync options**: `-a` or its parts separately (`-r`, `-l`, `-p`, `-t`, `-g`, `-o`,
   `-D`, e.g. `-rlt`), `-H`, `-A`, `-X`, `-v`, `-h`, `--partial`,
   `--progress` / `--info=progress2`, `-c`, `-u`, `--ignore-existing`, `-z`, `--bwlimit`, `-e`,
@@ -89,7 +89,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 The remote tests (copy to and from an ssh host with names that are not valid UTF-8, verified moves
-in both directions, copying and a verified move on the server, cancelling (also of rsync on the server), a password and an unknown host key answered through `SSH_ASKPASS`)
+in both directions, copying, a verified move and the checks on the server, an sftp-only account, an sshfs
+mount of the test server (skipped without sshfs), one shared ssh login, cancelling (also of rsync on the server), a password and an unknown host key answered through `SSH_ASKPASS`)
 are skipped unless there is a test server. With Docker, this runs all tests against a throwaway
 container with sshd and rsync (Alpine), on `127.0.0.1:2222`, with a key and a `known_hosts` file of
 its own - `~/.ssh` is not used:
@@ -383,8 +384,9 @@ the list, presets are not listed there (they have *Load preset*).
 ```
 
 - `autoModifyWindow`: add `--modify-window=1` for FAT destinations (see above); `false` never adds it,
-- `runOnServer`: run rsync on the server when the sources and the destination are on it (see *Copying on
-  the server*); `false` refuses such a copy,
+- `runOnServer`: run rsync on the server when the sources and the destination are on it, and use ssh for
+  network shares set up for it (see *Copying on the server* and *Network shares*); `false` refuses a copy
+  between two remote locations and always goes through the mounts,
 - `progress`: `none`, `per-file` (`--progress`, `-P` with `partial`), `overall` (`--info=progress2`),
 - `existing`: `replace`, `skip-newer` (`-u`), `ignore-existing` (`--ignore-existing`),
 - `recursive`, `links`, `perms`, `times`, `group`, `owner`, `devices` (`-rlptgoD`) are used only
@@ -443,13 +445,50 @@ ssh -- user@nas "rsync -avhP -- '/volume1/Photos 2024' /volume1/Backup/"
   notices only when it next writes). The remote command reports the PID of its rsync first
   (`echo RSYNC-GUI-PID $$; exec rsync ...`), and *Cancel* stops it with `ssh host kill -TERM <pid>`; the local
   ssh is terminated after 5 s if it is still running.
-- Not done on the server yet: checking that the sources exist and the free space, creating the destination
-  (rsync creates the last directory; `--mkpath` in the additional arguments creates all), the total size for
-  the speed graph, removing emptied source directories after a move. The destination inside a source
-  directory is refused by comparing the paths (symlinks are not resolved). The verification may read the
-  copies from the server's page cache.
+- **Checks before the start**: one ssh call runs a small POSIX `sh` script on the server (busybox is enough):
+  whether the account runs commands (an sftp-only account is reported before anything starts), whether rsync is
+  installed, which sources exist (missing ones can be left out, as local ones), whether the destination exists
+  (it is created with `mkdir -p` after asking), is writable and how much space is free, and whether it is
+  inside a source directory (by the real paths, symlinks resolved). The rsync version and the free space are
+  written to the log.
+- After a move with *Also remove source directories that are left empty* the emptied directories are removed
+  on the server too (only `rmdir`, deepest first, symlinks not followed, other file systems not entered).
+- The total size for Plasma's speed graph is measured with `du` over ssh (also for remote sources copied here).
+- **One login per job**: all ssh connections of a run to a server share one connection (`ControlMaster`, a
+  socket in `$XDG_RUNTIME_DIR/rsync-gui`, kept 60 s after the last use), so a password is asked for once,
+  not for every check, copy, verification and removal. Only when the remote shell is `ssh`.
+- The verification on the server may read the copies from the server's page cache (only root could drop it).
 - Sources from other hosts (or local ones) in the same job are copied as before, each group by its own
   rsync run.
+
+## Network shares (CIFS/SMB, sshfs)
+
+A copy between two directories of a mounted network share reads every byte over the network and writes it
+back - twice through this computer. When the server of the share is also reachable over ssh (with a shell and
+rsync), Rsync GUI can use ssh instead of the mount:
+
+| source | destination | how |
+|---|---|---|
+| on the share | on the share (same server) | rsync **on the server**, with the server's paths |
+| here | on the share | rsync over ssh to the server (only changes are transferred, the file list is built there) |
+| on the share | here | rsync over ssh from the server |
+| a share not set up / another server | anything | through the mount as before; a warning in the log when the data crosses the network twice |
+
+- The shares are found in `/proc/self/mountinfo`: **sshfs** mounts name the server and the path
+  (`user@host:/path`); **CIFS** mounts name the server and the share (`//server/share`) and the `username=`
+  option (used as the ssh user). The path of a Samba share on the server is not in the mount - *Detect*
+  asks Samba with `testparm` over ssh, or it is typed in.
+- **Opt-in per share**: nothing changes until a share is set up. The first time a share is used, the window
+  offers *Set up…* / *Not now* / *Never for this share*. *File → Network shares…* lists the mounted shares
+  and those set up before; *Test* checks the ssh login, rsync and the path. The settings are kept in
+  `~/.config/fapped/rsync-gui.conf` (`[shares]`).
+- *Run rsync on the server when the sources and the destination are on it* (`runOnServer`) off turns all of
+  this off (e.g. in a preset).
+- Files copied over ssh are created by the **ssh user** with the modes rsync gives them (`-p`), not by Samba
+  (`force user`, `create mask`): *Detect* shows these Samba settings of the share when there are any.
+- The ssh port of an sshfs mount is not in the mount table: set it in the dialog (or in `~/.ssh/config`).
+- The paths stay local in the window, the log says where each one is reached over ssh, and the command
+  preview shows the commands as they will run.
 
 ## File names that are not valid UTF-8
 

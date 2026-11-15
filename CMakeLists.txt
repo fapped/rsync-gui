@@ -19,6 +19,7 @@ add_library(rsynccore STATIC
     src/rsyncoptions.h src/rsyncoptions.cpp
     src/rsyncjob.h src/rsyncjob.cpp
     src/remoteprobe.h src/remoteprobe.cpp
+    src/networkshares.h src/networkshares.cpp
     src/speedhistory.h src/speedhistory.cpp
     src/filelisting.h src/filelisting.cpp
     src/runlog.h src/runlog.cpp
@@ -34,6 +35,7 @@ qt_add_executable(rsync-gui
     src/speedgraph.h src/speedgraph.cpp
     src/filedialog.h src/filedialog.cpp
     src/elidedlabel.h src/elidedlabel.cpp
+    src/sharedialog.h src/sharedialog.cpp
 )
 target_link_libraries(rsync-gui PRIVATE rsynccore Qt6::Widgets Qt6::DBus Qt6::Concurrent)
 

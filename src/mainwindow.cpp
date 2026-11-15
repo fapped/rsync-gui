@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "sharedialog.h"
 #include "elidedlabel.h"
 #include "filedialog.h"
 #include "filelisting.h"
@@ -539,6 +540,9 @@ void MainWindow::buildMenus()
                                              tr("&Recent settings"));
     connect(m_recentSettingsMenu, &QMenu::aboutToShow, this, &MainWindow::populateRecentSettingsMenu);
     fileMenu->addSeparator();
+    m_sharesAction = fileMenu->addAction(QIcon::fromTheme(QStringLiteral("folder-network")), tr("&Network shares..."),
+                                         this, &MainWindow::showNetworkShares);
+    fileMenu->addSeparator();
     QAction *quit = fileMenu->addAction(QIcon::fromTheme(QStringLiteral("application-exit")), tr("&Quit"), this,
                                         &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
@@ -969,8 +973,12 @@ void MainWindow::updatePreview()
 {
     const RsyncOptions options = currentOptions();
     const Location dest = destination();
-    const RsyncJob::Plan plan = RsyncJob::plan(sources(), dest.isValid() ? dest : Location::parse(QStringLiteral("/DEST")),
-                                               options);
+    // As the copy will run: network shares set up for ssh replaced by their locations on the server.
+    QSettings store;
+    const ShareRouting routing = ShareRouting::route(
+        sources(), dest.isValid() ? dest : Location::parse(QStringLiteral("/DEST")), Mount::current(),
+        [&store](const QString &key) { return ShareSettings::load(store, key); }, options.runOnServer, options.contentsOnly);
+    const RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
     QStringList args = options.arguments(plan.transfers.isEmpty() ? 0 : plan.transfers.first().port);
     args << QStringLiteral("--");
     QString text;
@@ -1009,6 +1017,8 @@ void MainWindow::updateControls()
         m_presetMenu->setEnabled(!running);
     if (m_recentSettingsMenu)
         m_recentSettingsMenu->setEnabled(!running);
+    if (m_sharesAction)
+        m_sharesAction->setEnabled(!running);
     for (QCheckBox *box : impliedByArchive())
         box->setEnabled(!m_archiveCheck->isChecked());
     m_bwLimitEdit->setEnabled(m_bwLimitCheck->isChecked());
@@ -1241,18 +1251,25 @@ void MainWindow::startCopy()
         }
     }
 
-    RsyncJob::Plan plan = RsyncJob::plan(sources(), dest, options);
-    if (!plan.error.isEmpty()) {
-        QMessageBox::warning(this, tr("Cannot continue"), plan.error);
-        return;
-    }
-    if (!plan.missing.isEmpty()) {
-        const auto answer = QMessageBox::question(
-            this, tr("Some sources do not exist"),
-            tr("These sources do not exist:\n%1\n\nContinue without them?")
-                .arg(LocalPath::display(plan.missing.join(QLatin1Char('\n')))));
-        if (answer != QMessageBox::Yes)
+    // The local paths are checked as they are (also those on network mounts), before anything is decided about them.
+    QList<Location> sourceList = sources();
+    QStringList skipped; // missing sources the user chose to leave out (for the log)
+    {
+        const RsyncJob::Plan check = RsyncJob::plan(sourceList, dest, options);
+        if (!check.error.isEmpty()) {
+            QMessageBox::warning(this, tr("Cannot continue"), check.error);
             return;
+        }
+        if (!check.missing.isEmpty()) {
+            const auto answer = QMessageBox::question(
+                this, tr("Some sources do not exist"),
+                tr("These sources do not exist:\n%1\n\nContinue without them?")
+                    .arg(LocalPath::display(check.missing.join(QLatin1Char('\n')))));
+            if (answer != QMessageBox::Yes)
+                return;
+            sourceList.removeIf([&check](const Location &loc) { return !loc.isRemote() && check.missing.contains(loc.path); });
+            skipped = check.missing;
+        }
     }
 
     if (!dest.isRemote() && !LocalPath::info(dest.path).exists && !options.dryRun) {
@@ -1266,16 +1283,80 @@ void MainWindow::startCopy()
         }
     }
 
+    // Network shares set up for ssh are reached over ssh (or rsync runs on their server) instead of the mount.
+    const QList<Mount> mounts = Mount::current();
+    QSettings store;
+    const auto lookup = [&store](const QString &key) { return ShareSettings::load(store, key); };
+    ShareRouting routing = ShareRouting::route(sourceList, dest, mounts, lookup, options.runOnServer, options.contentsOnly);
+    if (!routing.unsetShares.isEmpty()) {
+        bool changed = false;
+        for (const NetworkShare &share : std::as_const(routing.unsetShares))
+            changed = offerShareSetup(share, options) || changed;
+        if (changed)
+            routing = ShareRouting::route(sourceList, dest, mounts, lookup, options.runOnServer, options.contentsOnly);
+    }
+    RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
+    if (!plan.error.isEmpty()) {
+        QMessageBox::warning(this, tr("Cannot continue"), plan.error);
+        return;
+    }
+    plan.missing = skipped + plan.missing;
+    if (routing.throughNetworkTwice) {
+        plan.notes << tr("Sources on a network share are copied to a network destination through this computer - the "
+                         "data crosses the network twice. A share set up for ssh (File > Network shares) is copied "
+                         "on its server instead.");
+    }
+    m_runSources = routing.sources;
+    m_runDestination = routing.destination;
+
     // All ssh connections of the run to one server share one login (one password question at most).
     options.sshControlPath = RsyncOptions::defaultSshControlPath();
-    if (checkServers(options, dest, plan))
+    if (checkServers(options, dest, plan, routing.notes))
         return; // continues in onServersChecked()
-    continueCopy(options, dest, std::move(plan), {});
+    continueCopy(options, dest, std::move(plan), routing.notes);
 }
 
-bool MainWindow::checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan)
+bool MainWindow::offerShareSetup(const NetworkShare &share, const RsyncOptions &options)
 {
-    PendingCopy pending{options, dest, std::move(plan), {}, {}};
+    QMessageBox box(QMessageBox::Question, tr("Network share"),
+                    tr("%1 is the network share %2.\n\nCopying over ssh instead of through the mount is faster: rsync "
+                       "runs on the server when the source and the destination are both there (the data does not go "
+                       "through this computer twice), and otherwise only the changes are transferred. The server "
+                       "needs ssh with a shell and rsync.\n\nSet it up now?")
+                        .arg(LocalPath::display(share.mountPoint), share.display()),
+                    QMessageBox::NoButton, this);
+    QPushButton *setUp = box.addButton(tr("Set up..."), QMessageBox::AcceptRole);
+    box.addButton(tr("Not now"), QMessageBox::RejectRole);
+    QPushButton *never = box.addButton(tr("Never for this share"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(setUp);
+    box.exec();
+    QSettings store;
+    if (box.clickedButton() == never) {
+        ShareSettings settings = ShareSettings::load(store, share.key);
+        settings.use = ShareSettings::Use::Never;
+        settings.save(store, share.key);
+        return false;
+    }
+    if (box.clickedButton() != setUp)
+        return false;
+    ShareDialog dialog(share, ShareSettings::detected(share), options, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return false;
+    const ShareSettings settings = dialog.settings();
+    settings.save(store, share.key);
+    return settings.isUsable();
+}
+
+void MainWindow::showNetworkShares()
+{
+    SharesDialog dialog(currentOptions(), this);
+    dialog.exec();
+}
+
+bool MainWindow::checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan,
+                              const QStringList &infos)
+{
+    PendingCopy pending{options, dest, std::move(plan), infos, {}, {}};
     for (int i = 0; i < pending.plan.transfers.size(); ++i) {
         const RsyncJob::Transfer &transfer = pending.plan.transfers.at(i);
         if (!transfer.runsOnServer())
@@ -1312,7 +1393,7 @@ void MainWindow::onServersChecked()
     RsyncJob::Plan &plan = pending.plan;
     const RsyncOptions &options = pending.options;
 
-    QStringList infos;
+    QStringList infos = pending.infos;
     QStringList missing;
     QStringList notWritable;
     bool createMissing = false;
@@ -1358,8 +1439,10 @@ void MainWindow::onServersChecked()
         if (answer != QMessageBox::Yes)
             return;
         for (auto it = pending.results.cbegin(); it != pending.results.cend(); ++it) {
-            for (const QString &path : it.value().missingSources())
+            for (const QString &path : it.value().missingSources()) {
                 plan.transfers[it.key()].sources.removeAll(path);
+                plan.missing << tr("%1 (on %2)").arg(path, plan.transfers.at(it.key()).host);
+            }
         }
         plan.transfers.removeIf([](const RsyncJob::Transfer &transfer) { return transfer.sources.isEmpty(); });
         if (plan.transfers.isEmpty()) {
@@ -1391,8 +1474,8 @@ void MainWindow::onServersChecked()
 void MainWindow::continueCopy(RsyncOptions options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos)
 {
     // FAT keeps file times to 2 s: without a tolerance rsync would copy half of the files again on every run.
-    if (options.autoModifyWindow && !dest.isRemote() && (options.archive || options.times))
-        options.modifyWindow = RsyncJob::modifyWindowFor(dest.path, !options.dryRun);
+    if (options.autoModifyWindow && !m_runDestination.isRemote() && (options.archive || options.times))
+        options.modifyWindow = RsyncJob::modifyWindowFor(m_runDestination.path, !options.dryRun);
 
     // Copying is not destructive - only the options that delete files are confirmed.
     if (!options.dryRun && (options.deleteExtraneous || options.removeSourceFiles)) {
@@ -1457,17 +1540,20 @@ void MainWindow::continueCopy(RsyncOptions options, const Location &dest, RsyncJ
     QString logFileError;
     if (options.logToFile)
         m_runLog.open(RunLog::defaultDirectory(QStringLiteral("rsync-gui")), QDateTime::currentDateTime(), &logFileError);
-    for (const QString &note : std::as_const(plan.notes))
-        appendLog(RsyncJob::LogLevel::Warning, note);
-    for (const QString &missing : std::as_const(plan.missing))
-        appendLog(RsyncJob::LogLevel::Warning, tr("Skipped missing source: %1").arg(LocalPath::display(missing)));
+    qsizetype sourceCount = 0;
+    for (const RsyncJob::Transfer &transfer : m_job->transfers())
+        sourceCount += transfer.sources.size();
     appendLogLines(RsyncJob::LogLevel::Info,
-                   tr("=== Start: %1 source(s) to %2 ===").arg(sources().size()).arg(LocalPath::display(dest.toString())),
+                   tr("=== Start: %1 source(s) to %2 ===").arg(sourceCount).arg(LocalPath::display(dest.toString())),
                    true);
     if (m_runLog.isOpen())
         appendLog(RsyncJob::LogLevel::Info, tr("Log file: %1").arg(RunLog::displayDirectory(m_runLog.path())));
     else if (options.logToFile)
         appendLog(RsyncJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
+    for (const QString &note : std::as_const(plan.notes))
+        appendLog(RsyncJob::LogLevel::Warning, note);
+    for (const QString &missing : std::as_const(plan.missing))
+        appendLog(RsyncJob::LogLevel::Warning, tr("Skipped missing source: %1").arg(LocalPath::display(missing)));
     for (const QString &info : infos)
         appendLog(RsyncJob::LogLevel::Info, info);
     if (options.modifyWindow > 0) {
@@ -1518,7 +1604,7 @@ void MainWindow::startDesktopProgress(const RsyncOptions &options, const Locatio
         updateInfo();
     });
     connect(m_job, &RsyncJob::transferRateChanged, m_desktopProgress, &DesktopProgress::setSpeed);
-    measureSourcesForDesktopProgress(options);
+    measureSourcesForDesktopProgress(options, m_runSources);
     connect(m_job, &RsyncJob::phaseChanged, m_desktopProgress, [this](const QString &phase) {
         if (phase.isEmpty())
             return;
@@ -1527,13 +1613,12 @@ void MainWindow::startDesktopProgress(const RsyncOptions &options, const Locatio
     });
 }
 
-void MainWindow::measureSourcesForDesktopProgress(const RsyncOptions &options)
+void MainWindow::measureSourcesForDesktopProgress(const RsyncOptions &options, const QList<Location> &list)
 {
     // Plasma's speed graph needs the total size, which rsync does not report: the local sources are
     // measured in the background. With a remote source there is no total (and no graph).
     stopMeasuringSources();
     QStringList paths;
-    const QList<Location> list = sources();
     const bool remote = !list.isEmpty() && list.first().isRemote();
     for (const Location &loc : list) {
         // Local sources are measured here, remote ones of one server there (du over ssh); a mix is not measured.

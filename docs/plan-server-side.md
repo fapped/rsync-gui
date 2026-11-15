@@ -1,5 +1,10 @@
 # Plan: running rsync on the server
 
+All steps are done (2026-11-15); this file stays as the record of the design. Differences from the plan:
+the shares of steps 3 and 4 share one dialog and one settings format (sshfs is opt-in too, as an sftp-only
+account can be mounted with sshfs but cannot run rsync); the ownership check shows Samba's settings in the
+share dialog instead of a warning per copy; `--chmod` from the masks is left in TODO.
+
 The TODO item "Run rsync on the server when the source and the destination are on the same host", split into
 steps that can each be committed, tested and used on their own. The order puts first what gives the most with
 the least risk: `sftp://` on both sides needs no mount detection and no settings.
@@ -50,7 +55,7 @@ the least risk: `sftp://` on both sides needs no mount detection and no settings
 
 Result: two `sftp://` locations of one server (Dolphin) work, and the data stays on the server.
 
-## Step 2 - checks over ssh (the probe)
+## Step 2 - checks over ssh (the probe) (done 2026-11-15)
 
 Before the job starts, one ssh call per host runs a small `sh` script (no bash, no GNU-only options - busybox
 must do) and prints machine-readable lines:
@@ -80,7 +85,7 @@ password. All ssh calls of a job use `-o ControlMaster=auto -o ControlPath=$XDG_
 -o ControlPersist=60` - one login per job. Only added when the remote shell is plain `ssh` (a custom `-e`
 command is left as it is).
 
-## Step 3 - mounted shares: sshfs
+## Step 3 - mounted shares: sshfs (done 2026-11-15)
 
 `MountTable` (new, in `rsynccore`) parses `/proc/self/mountinfo` (octal escapes `\040` etc., the mount root
 field for mounts of a subdirectory) and maps a local path to `(mount, path inside the mount)`.
@@ -92,7 +97,7 @@ field for mounts of a subdirectory) and maps a local path to `(mount, path insid
 - Tests: mountinfo fixtures (unit). A real sshfs mount of the test container works without root
   (`fusermount3`) - added to `tools/ssh-test/run.sh` when `sshfs` is installed, skipped otherwise.
 
-## Step 4 - mounted shares: CIFS
+## Step 4 - mounted shares: CIFS (done 2026-11-15)
 
 - `cifs` mounts give `//server/share` (+ a `prefixpath` for a subdirectory). The ssh target and the path of the
   share on the server are not in it:
@@ -112,7 +117,7 @@ field for mounts of a subdirectory) and maps a local path to `(mount, path insid
 - Tests: testparm parsing (unit), a Samba share in the test container (`testparm` query only; mounting CIFS
   needs root - checked by hand with the user's NAS).
 
-## Step 5 - choosing the transfer, the option, warnings
+## Step 5 - choosing the transfer, the option, warnings (done 2026-11-15)
 
 Pure function `chooseRoute(source, destination, settings)` with unit tests for every combination:
 
@@ -129,7 +134,7 @@ Pure function `chooseRoute(source, destination, settings)` with unit tests for e
   the confirmation of a share is that switch.
 - The source list tooltip and the info line say where each source really is ("on server X, /volume1/...").
 
-## Step 6 - documentation, screenshots
+## Step 6 - documentation, screenshots (done 2026-11-15)
 
 README (a section on running on the server: requirements - ssh login with a POSIX shell and rsync on the server,
 what is checked, ownership), NOTES (decisions above), TODO ticked; screenshots only if the window changes.

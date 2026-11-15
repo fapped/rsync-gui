@@ -2,6 +2,7 @@
 
 #include "desktopprogress.h"
 #include "location.h"
+#include "networkshares.h"
 #include "remoteprobe.h"
 #include "rsyncjob.h"
 #include "runlog.h"
@@ -96,14 +97,17 @@ private:
     void startCopy();
     // Transfers that run on a server: checks the servers first (asynchronously, see RemoteProbe), then continues
     // with continueCopy(). Returns false if there is nothing to check.
-    bool checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan);
+    bool checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos);
+    // Offers to set up a network share that is used here but not set up yet; true if it is now set up for ssh.
+    bool offerShareSetup(const NetworkShare &share, const RsyncOptions &options);
+    void showNetworkShares();
     void onServersChecked();
     // The rest of startCopy() after the checks: FAT, the confirmation of deleting options, the start.
     void continueCopy(RsyncOptions options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos);
     bool isBusy() const; // a job runs or the servers are being checked
     void cancelCopy();
     void startDesktopProgress(const RsyncOptions &options, const Location &dest);
-    void measureSourcesForDesktopProgress(const RsyncOptions &options);
+    void measureSourcesForDesktopProgress(const RsyncOptions &options, const QList<Location> &list);
     void stopMeasuringSources();
     void appendLog(RsyncJob::LogLevel level, const QString &text);
     // `withDate`: the line starts with the date too (the start of a run).
@@ -191,10 +195,16 @@ private:
         RsyncOptions options;
         Location dest;
         RsyncJob::Plan plan;
+        QStringList infos;
         QHash<int, RemoteProbe::Result> results; // by the index of the transfer
         QList<QPointer<RemoteProbe>> probes;
     };
     std::optional<PendingCopy> m_pending;
+    // The sources and the destination of the run as rsync gets them (network shares set up for ssh replaced by
+    // their locations on the server, see ShareRouting).
+    QList<Location> m_runSources;
+    Location m_runDestination;
+    QAction *m_sharesAction = nullptr;
     QPointer<QProcess> m_remoteMeasure; // du on the server for the total size
     QDate m_logDate; // the date of the last log line - a new day gets a line of its own
     DesktopProgress *m_desktopProgress = nullptr;

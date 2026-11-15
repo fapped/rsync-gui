@@ -1,5 +1,6 @@
 #include "filelisting.h"
 #include "localpath.h"
+#include "networkshares.h"
 #include "location.h"
 #include "remoteprobe.h"
 #include "rsyncjob.h"
@@ -271,6 +272,10 @@ private slots:
     void probeParse();
     void probeScriptLocally();
     void cleanUpScriptLocally();
+    void mountInfo();
+    void networkShares();
+    void shareSettings();
+    void shareRouting();
     void parseProgress_data();
     void parseProgress();
     void parseSizeAndRate_data();
@@ -341,6 +346,7 @@ private slots:
     void remoteProbe();
     void remoteOnServerMoveRemovesDirs();
     void remoteSharedConnection();
+    void remoteSshfsShare();
     void remoteAskpassHostKeyAndPassword();
 };
 
@@ -970,6 +976,193 @@ void TestRsyncCore::cleanUpScriptLocally()
         QVERIFY2(fields.contains("removed") && fields.contains("./a it's") && fields.contains("2"), out.constData());
         QVERIFY(fields.contains("left"));
     }
+}
+
+void TestRsyncCore::mountInfo()
+{
+    const QByteArray info =
+        "22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n"
+        "41 30 0:51 / /mnt/video rw,relatime shared:858 - cifs //10.0.0.6/Video rw,vers=3.1.1,username=anna,uid=1000\n"
+        "42 30 0:52 /sub/dir /media/old\\040disk rw shared:9 master:2 - cifs //nas/Data rw,username=bob\n"
+        "43 30 0:53 / /mnt/sshfs rw,nosuid - fuse.sshfs anna@server:/srv/photos rw,user_id=1000\n"
+        "44 30 0:54 / /mnt/home rw - fuse.sshfs server: rw\n"
+        "45 30 0:55 / /mnt/v6 rw - fuse.sshfs [fe80::1]:/x rw\n"
+        "bad line\n";
+    const QList<Mount> mounts = Mount::parse(info);
+    QCOMPARE(mounts.size(), 6);
+    QCOMPARE(mounts.at(2).mountPoint, QStringLiteral("/media/old disk"));
+    QCOMPARE(mounts.at(2).root, QStringLiteral("/sub/dir"));
+    QCOMPARE(mounts.at(2).source, QStringLiteral("//nas/Data"));
+    QCOMPARE(Mount::find(mounts, "/mnt/video/a/b")->mountPoint, QStringLiteral("/mnt/video"));
+    QCOMPARE(Mount::find(mounts, "/mnt/video")->mountPoint, QStringLiteral("/mnt/video"));
+    QCOMPARE(Mount::find(mounts, "/mnt/video2")->mountPoint, QStringLiteral("/"));
+    QCOMPARE(Mount::find(mounts, "/media/old disk/x")->fsType, QStringLiteral("cifs"));
+    // The real table can be read (whatever is mounted here).
+    QVERIFY(!Mount::current().isEmpty());
+}
+
+void TestRsyncCore::networkShares()
+{
+    const QList<Mount> mounts = Mount::parse(
+        "22 1 8:2 / / rw - ext4 /dev/sda2 rw\n"
+        "41 30 0:51 / /mnt/video rw - cifs //10.0.0.6/Video rw,vers=3.1.1,username=anna,uid=1000\n"
+        "42 30 0:52 /sub/dir /media/old\\040disk rw - cifs //nas/Data rw,username=bob\n"
+        "46 30 0:56 / /media/pre rw - cifs //nas/Pre rw,prefixpath=/a/b\n"
+        "43 30 0:53 / /mnt/sshfs rw - fuse.sshfs anna@server:/srv/photos rw\n"
+        "44 30 0:54 / /mnt/home rw - fuse.sshfs server: rw\n"
+        "45 30 0:55 / /mnt/v6 rw - fuse.sshfs [fe80::1]:/x rw\n");
+    QString rel;
+    auto share = NetworkShare::of(mounts, "/mnt/video/2024/a.mkv", &rel);
+    QVERIFY(share);
+    QCOMPARE(share->kind, NetworkShare::Kind::Cifs);
+    QCOMPARE(share->key, QStringLiteral("//10.0.0.6/Video"));
+    QCOMPARE(share->server, QStringLiteral("10.0.0.6"));
+    QCOMPARE(share->share, QStringLiteral("Video"));
+    QCOMPARE(share->user, QStringLiteral("anna"));
+    QCOMPARE(share->remotePath, QString());
+    QCOMPARE(rel, QStringLiteral("2024/a.mkv"));
+    share = NetworkShare::of(mounts, "/media/old disk", &rel);
+    QCOMPARE(share->remotePath, QStringLiteral("sub/dir")); // mounted from a subdirectory of the share
+    QCOMPARE(share->display(), QStringLiteral("//nas/Data/sub/dir"));
+    QCOMPARE(rel, QString());
+    QCOMPARE(NetworkShare::of(mounts, "/media/pre/x")->remotePath, QStringLiteral("a/b"));
+    share = NetworkShare::of(mounts, "/mnt/sshfs/2020", &rel);
+    QCOMPARE(share->kind, NetworkShare::Kind::Sshfs);
+    QCOMPARE(share->key, QStringLiteral("sshfs:anna@server:/srv/photos"));
+    QCOMPARE(share->user, QStringLiteral("anna"));
+    QCOMPARE(share->server, QStringLiteral("server"));
+    QCOMPARE(share->remotePath, QStringLiteral("/srv/photos"));
+    QCOMPARE(NetworkShare::of(mounts, "/mnt/home")->remotePath, QString());
+    QCOMPARE(NetworkShare::of(mounts, "/mnt/v6")->server, QStringLiteral("fe80::1"));
+    QVERIFY(!NetworkShare::of(mounts, "/home/user"));
+    QVERIFY(NetworkShare::sharePathCommand("my share").contains("--section-name='my share'"));
+    // Known only from the settings (not mounted).
+    QCOMPARE(NetworkShare::fromKey("//nas/Video").share, QStringLiteral("Video"));
+    QCOMPARE(NetworkShare::fromKey("//nas/Video").mountPoint, QString());
+    QCOMPARE(NetworkShare::fromKey("sshfs:anna@server:/srv").remotePath, QStringLiteral("/srv"));
+    QCOMPARE(NetworkShare::fromKey("sshfs:anna@server:/srv").key, QStringLiteral("sshfs:anna@server:/srv"));
+
+    // Detected settings: sshfs knows everything, CIFS only the server and the user.
+    ShareSettings detected = ShareSettings::detected(*NetworkShare::of(mounts, "/mnt/sshfs"));
+    QCOMPARE(detected.sshTarget, QStringLiteral("anna@server"));
+    QCOMPARE(detected.serverPath, QStringLiteral("/srv/photos"));
+    QCOMPARE(ShareSettings::detected(*NetworkShare::of(mounts, "/mnt/home")).serverPath, QStringLiteral("~"));
+    detected = ShareSettings::detected(*NetworkShare::of(mounts, "/mnt/video"));
+    QCOMPARE(detected.sshTarget, QStringLiteral("anna@10.0.0.6"));
+    QCOMPARE(detected.serverPath, QString());
+    QCOMPARE(detected.use, ShareSettings::Use::Unset);
+}
+
+void TestRsyncCore::shareSettings()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QSettings settings(tmp.filePath("s.conf"), QSettings::IniFormat);
+    ShareSettings a;
+    a.use = ShareSettings::Use::Enabled;
+    a.sshTarget = QStringLiteral("anna@nas");
+    a.port = 2222;
+    a.serverPath = QStringLiteral("/volume1/video/");
+    a.save(settings, "//10.0.0.6/Video");
+    ShareSettings never;
+    never.use = ShareSettings::Use::Never;
+    never.save(settings, "sshfs:x@y:/z");
+    QCOMPARE(ShareSettings::savedKeys(settings), (QStringList{"//10.0.0.6/Video", "sshfs:x@y:/z"}));
+    const ShareSettings b = ShareSettings::load(settings, "//10.0.0.6/Video");
+    QCOMPARE(b.use, ShareSettings::Use::Enabled);
+    QCOMPARE(b.sshTarget, a.sshTarget);
+    QCOMPARE(b.port, 2222);
+    QVERIFY(b.isUsable());
+    QCOMPARE(ShareSettings::load(settings, "sshfs:x@y:/z").use, ShareSettings::Use::Never);
+    QCOMPARE(ShareSettings::load(settings, "unknown").use, ShareSettings::Use::Unset);
+    Location loc = b.location("2024/a b");
+    QCOMPARE(loc.user, QStringLiteral("anna"));
+    QCOMPARE(loc.host, QStringLiteral("nas"));
+    QCOMPARE(loc.port, 2222);
+    QCOMPARE(loc.path, QStringLiteral("/volume1/video/2024/a b"));
+    QCOMPARE(b.location(QString()).path, QStringLiteral("/volume1/video"));
+    ShareSettings::remove(settings, "sshfs:x@y:/z");
+    QCOMPARE(ShareSettings::savedKeys(settings), QStringList{"//10.0.0.6/Video"});
+}
+
+void TestRsyncCore::shareRouting()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    // Mount points in a temporary directory, so that "is a directory" can be looked at through them.
+    const QString video = tmp.filePath("video");
+    const QString audio = tmp.filePath("audio");
+    const QString photos = tmp.filePath("photos");
+    QVERIFY(QDir().mkpath(video + "/dir"));
+    QVERIFY(QDir().mkpath(audio));
+    QVERIFY(QDir().mkpath(photos));
+    const auto line = [](int id, const QString &point, const QString &type, const QString &source) {
+        return QStringLiteral("%1 1 0:%1 / %2 rw - %3 %4 rw\n").arg(id).arg(point, type, source).toUtf8();
+    };
+    const QList<Mount> mounts = Mount::parse("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" + line(2, video, "cifs", "//nas/Video")
+                                             + line(3, audio, "cifs", "//nas/Audio")
+                                             + line(4, photos, "fuse.sshfs", "u@other:/srv/photos"));
+    QHash<QString, ShareSettings> stored;
+    ShareSettings nasVideo;
+    nasVideo.use = ShareSettings::Use::Enabled;
+    nasVideo.sshTarget = QStringLiteral("nas");
+    nasVideo.serverPath = QStringLiteral("/volume1/video");
+    stored.insert("//nas/Video", nasVideo);
+    ShareSettings otherPhotos = ShareSettings::detected(*NetworkShare::of(mounts, photos));
+    otherPhotos.use = ShareSettings::Use::Enabled;
+    stored.insert("sshfs:u@other:/srv/photos", otherPhotos);
+    const auto lookup = [&stored](const QString &key) { return stored.value(key); };
+    const Location local = Location::parse(tmp.filePath("local"));
+
+    // Both on one host: rsync on the server (plan() makes it one transfer there).
+    ShareRouting r = ShareRouting::route({Location::parse(video + "/dir")}, Location::parse(video + "/backup"), mounts,
+                                         lookup, true);
+    QCOMPARE(r.sources.first().toString(), QStringLiteral("nas:/volume1/video/dir"));
+    QCOMPARE(r.destination.toString(), QStringLiteral("nas:/volume1/video/backup"));
+    QVERIFY(!r.throughNetworkTwice);
+    QCOMPARE(r.notes.size(), 2);
+    RsyncJob::Plan plan = RsyncJob::plan(r.sources, r.destination, RsyncOptions());
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    QVERIFY(plan.transfers.first().runsOnServer());
+    // Contents only: the "/" is added for the server.
+    r = ShareRouting::route({Location::parse(video + "/dir")}, local, mounts, lookup, true, true);
+    QCOMPARE(r.sources.first().path, QStringLiteral("/volume1/video/dir/"));
+
+    // Local <-> share: over ssh.
+    r = ShareRouting::route({local}, Location::parse(video), mounts, lookup, true);
+    QCOMPARE(r.sources.first(), local);
+    QCOMPARE(r.destination.toString(), QStringLiteral("nas:/volume1/video"));
+    r = ShareRouting::route({Location::parse(video + "/dir")}, local, mounts, lookup, true);
+    QCOMPARE(r.sources.first().toString(), QStringLiteral("nas:/volume1/video/dir"));
+    QCOMPARE(r.destination, local);
+
+    // Another host than the destination: through the mount (rsync cannot copy between two hosts).
+    r = ShareRouting::route({Location::parse(photos + "/p"), Location::parse(video + "/dir")}, Location::parse(video),
+                            mounts, lookup, true);
+    QCOMPARE(r.sources.at(0), Location::parse(photos + "/p"));
+    QCOMPARE(r.sources.at(1).host, QStringLiteral("nas"));
+    QVERIFY(r.throughNetworkTwice);
+
+    // A share that is not set up: through the mount, offered to set it up; with both on network mounts a warning.
+    r = ShareRouting::route({Location::parse(audio + "/a")}, Location::parse(audio + "/b"), mounts, lookup, true);
+    QCOMPARE(r.sources.first(), Location::parse(audio + "/a"));
+    QCOMPARE(r.unsetKeys, QStringList{"//nas/Audio"});
+    QCOMPARE(r.unsetShares.first().share, QStringLiteral("Audio"));
+    QVERIFY(r.throughNetworkTwice);
+    stored.insert("//nas/Audio", ShareSettings{ShareSettings::Use::Never, {}, 0, {}});
+    QVERIFY(ShareRouting::route({Location::parse(audio + "/a")}, local, mounts, lookup, true).unsetKeys.isEmpty());
+
+    // The option off: nothing is changed and nothing offered.
+    stored.remove("//nas/Audio");
+    r = ShareRouting::route({Location::parse(video + "/dir")}, Location::parse(audio), mounts, lookup, false);
+    QCOMPARE(r.sources.first(), Location::parse(video + "/dir"));
+    QCOMPARE(r.destination, Location::parse(audio));
+    QVERIFY(r.unsetKeys.isEmpty());
+    QVERIFY(r.throughNetworkTwice);
+    // Remote locations are left as they are.
+    r = ShareRouting::route({Location::parse("sftp://nas/x")}, Location::parse(video), mounts, lookup, true);
+    QCOMPARE(r.sources.first(), Location::parse("sftp://nas/x"));
+    QVERIFY(RsyncJob::plan(r.sources, r.destination, RsyncOptions()).transfers.first().runsOnServer());
 }
 
 void TestRsyncCore::parseProgress_data()
@@ -2699,6 +2892,56 @@ void TestRsyncCore::remoteSharedConnection()
     QProcess stop;
     stop.start(program, ssh << "-O" << "exit" << "--" << server.home.user + "@" + server.home.host);
     QVERIFY(stop.waitForFinished(10000));
+}
+
+void TestRsyncCore::remoteSshfsShare()
+{
+    // A real sshfs mount of the test server: a copy between two of its directories runs on the server.
+    RemoteServer server(QStringLiteral("sshfs"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    if (QStandardPaths::findExecutable("sshfs").isEmpty() || QStandardPaths::findExecutable("fusermount3").isEmpty())
+        QSKIP("sshfs is not installed");
+    server.run(QStringLiteral("mkdir -p '%1/share/src' && printf data > '%1/share/src/f'").arg(server.dir));
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString mountPoint = tmp.filePath("mnt");
+    QVERIFY(QDir().mkpath(mountPoint));
+    const QString target = server.home.user + "@" + server.home.host;
+    QProcess sshfs;
+    sshfs.start("sshfs", {"-o", "ssh_command=" + server.shell, "-p", QString::number(server.home.port),
+                          target + ":" + server.dir + "/share", mountPoint});
+    QVERIFY(sshfs.waitForFinished(20000));
+    if (sshfs.exitCode() != 0)
+        QSKIP(qPrintable("sshfs cannot mount here: " + QString::fromLocal8Bit(sshfs.readAllStandardError())));
+    const auto unmount = qScopeGuard([&] { QProcess::execute("fusermount3", {"-u", mountPoint}); });
+    QVERIFY(QFileInfo::exists(mountPoint + "/src/f"));
+
+    const QList<Mount> mounts = Mount::current();
+    QString rel;
+    const std::optional<NetworkShare> share = NetworkShare::of(mounts, mountPoint + "/src", &rel);
+    QVERIFY(share);
+    QCOMPARE(share->kind, NetworkShare::Kind::Sshfs);
+    QCOMPARE(share->remotePath, server.dir + "/share");
+    QCOMPARE(rel, QStringLiteral("src"));
+    ShareSettings settings = ShareSettings::detected(*share);
+    QCOMPARE(settings.sshTarget, target);
+    settings.port = server.home.port; // not in the mount table
+    settings.use = ShareSettings::Use::Enabled;
+    const ShareRouting routing = ShareRouting::route({Location::parse(mountPoint + "/src")},
+                                                     Location::parse(mountPoint + "/dest"), mounts,
+                                                     [&](const QString &) { return settings; }, true);
+    RsyncOptions options = server.options();
+    const RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    QCOMPARE(plan.transfers.size(), 1);
+    QVERIFY(plan.transfers.first().runsOnServer());
+    QCOMPARE(plan.transfers.first().destination, server.dir + "/share/dest/");
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(server.run(QStringLiteral("cat '%1/share/dest/src/f'").arg(server.dir)), QByteArray("data"));
+    QCOMPARE(readFile(mountPoint + "/dest/src/f"), QByteArray("data")); // and seen through the mount
 }
 
 void TestRsyncCore::remoteAskpassHostKeyAndPassword()
