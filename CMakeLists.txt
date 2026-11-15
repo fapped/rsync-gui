@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.19)
 
 project(rsync-gui VERSION 0.1.0 LANGUAGES CXX)
 
+# The version of the program (--version, About) and of its package. The CI sets it from git: a tag v1.2.3 gives
+# 1.2.3, v1.2.3-rc1 gives 1.2.3~rc1, a later commit 1.2.3+4.g1a2b3c4 (see .github/workflows/deb.yml).
+set(APP_VERSION "${PROJECT_VERSION}" CACHE STRING "Version of the program and of its package (a Debian version)")
+if(NOT APP_VERSION MATCHES "^[0-9][0-9A-Za-z.+~]*$")
+    message(FATAL_ERROR "APP_VERSION \"${APP_VERSION}\" is not a Debian version without a revision (e.g. 1.2.3, "
+                        "1.2.3~rc1, 1.2.3+4.g1a2b3c4)")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -27,7 +35,7 @@ add_library(rsynccore STATIC
 )
 target_include_directories(rsynccore PUBLIC src)
 target_link_libraries(rsynccore PUBLIC Qt6::Core)
-target_compile_definitions(rsynccore PUBLIC RSYNC_GUI_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(rsynccore PUBLIC RSYNC_GUI_VERSION="${APP_VERSION}")
 
 qt_add_executable(rsync-gui
     src/main.cpp
@@ -98,6 +106,7 @@ set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
 set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
     OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_PACKAGE_VERSION "${APP_VERSION}")
 set(CPACK_DEBIAN_PACKAGE_SECTION utils)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "rsync, openssh-client")

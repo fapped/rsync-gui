@@ -151,7 +151,19 @@ tools/make-screenshots.sh
 (`runs-on: [self-hosted]`): on every push to `main`, for tags `v*` and by hand (*Actions → deb → Run
 workflow*). It runs the tests (`ctest`, the remote ones are skipped), then `tools/make-deb.sh`, shows the
 package's control fields and files and uploads it as an artifact (`rsync-gui-deb-<commit>`); for a tag `v*`
-it attaches the package to a GitHub release (with `gh`). The actions (`actions/checkout`,
+it attaches the package to a GitHub release (with `gh`).
+
+The version of the program and the package comes from git: a tag `v1.2.3` gives `1.2.3`, `v1.2.3-rc1` gives
+`1.2.3~rc1` (it sorts before `1.2.3`), a later commit on `main` gives e.g. `1.2.3+4.g1a2b3c4` (newer than
+`1.2.3`, older than the next release), so that `apt` updates installed packages in the right order. A release
+is just a tag:
+
+```bash
+git tag v0.2.0 && git push github v0.2.0
+```
+
+Locally the version is the project version in `CMakeLists.txt`, or `VERSION=1.2.3 tools/make-deb.sh`
+(`-DAPP_VERSION=1.2.3` for CMake). The actions (`actions/checkout`,
 `actions/upload-artifact`) are pinned to the commit hashes of their releases; they need runner 2.327.0+ (node24).
 
 The runner needs `build-essential cmake ninja-build qt6-base-dev dpkg-dev file gh` and for the tests

@@ -8,6 +8,9 @@
 # tests: rsync openssh-client. Missing packages are installed when the runner's user may use sudo without a password;
 # otherwise the job stops and names them.
 #
+# The version of the package comes from git (the step "Version"); a release is just: git tag v1.2.3 && git push
+# github v1.2.3.
+#
 # The actions are pinned to the commits of their releases (the version in the comment), from the official
 # repositories (github.com/actions); they run on node24 - runner 2.327.0 or newer.
 name: deb
@@ -41,6 +44,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the tags, for the version of builds between them
 
       - name: Check the build dependencies
         run: |
@@ -63,6 +67,27 @@ jobs:
           cmake --version | head -n 1
           dpkg-query -W -f='qt6-base-dev ${Version}\n' qt6-base-dev
           . /etc/os-release && echo "$PRETTY_NAME"
+
+      - name: Version
+        run: |
+          # A tag v1.2.3 gives 1.2.3, v1.2.3-rc1 gives 1.2.3~rc1 (sorts before 1.2.3); a commit after the tag v1.2.3
+          # gives 1.2.3+4.g1a2b3c4 (newer than 1.2.3, older than the next release). Without a tag: the project version.
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            version=${GITHUB_REF_NAME#v}
+            if [[ ! $version =~ ^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::The tag $GITHUB_REF_NAME is not of the form v1.2.3 or v1.2.3-rc1"
+              exit 1
+            fi
+          elif described=$(git describe --tags --long --match 'v[0-9]*' 2> /dev/null) \
+               && [[ $described =~ ^v(.+)-([0-9]+)-g([0-9a-f]+)$ ]]; then
+            version=${BASH_REMATCH[1]}
+            [ "${BASH_REMATCH[2]}" = 0 ] || version+="+${BASH_REMATCH[2]}.g${BASH_REMATCH[3]}"
+          else
+            version=
+          fi
+          version=${version//-/\~}
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "Version: ${version:-the project version}"
 
       - name: Tests
         run: |
