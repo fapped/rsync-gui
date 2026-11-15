@@ -1,0 +1,91 @@
+# Builds the Debian package (tools/make-deb.sh) on a self-hosted runner: after the tests, on every push to main,
+# for tags v* (the package is then attached to a GitHub release) and by hand (Actions -> deb -> Run workflow).
+#
+# Deliberately no pull_request trigger: the runner is a machine of the owner, and pull requests from forks would
+# run their code on it. The job runs on github.com only - Gitea Actions also reads .github/workflows.
+#
+# The runner needs (Debian/Ubuntu): build-essential cmake ninja-build qt6-base-dev dpkg-dev file, and for the
+# tests: rsync openssh-client. Missing packages are installed when the runner's user may use sudo without a password;
+# otherwise the job stops and names them.
+name: deb
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: deb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deb:
+    if: github.server_url == 'https://github.com'
+    runs-on: [self-hosted]
+    permissions:
+      contents: write # the release for tags
+    env:
+      APP: rsync-gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the build dependencies
+        run: |
+          missing=()
+          for pair in cmake:cmake ninja:ninja-build g++:g++ make:build-essential dpkg-shlibdeps:dpkg-dev \
+                      dpkg-deb:dpkg file:file rsync:rsync ssh:openssh-client; do
+            cmd=${pair%%:*} pkg=${pair#*:}
+            command -v "$cmd" > /dev/null || missing+=("$pkg")
+          done
+          dpkg -s qt6-base-dev > /dev/null 2>&1 || missing+=(qt6-base-dev)
+          if [ ${#missing[@]} -gt 0 ]; then
+            if sudo -n true 2> /dev/null; then
+              sudo apt-get update -q
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
+            else
+              echo "::error::Missing on the runner: ${missing[*]} - install them: sudo apt install ${missing[*]}"
+              exit 1
+            fi
+          fi
+          cmake --version | head -n 1
+          dpkg-query -W -f='qt6-base-dev ${Version}\n' qt6-base-dev
+          . /etc/os-release && echo "$PRETTY_NAME"
+
+      - name: Tests
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/test-build" -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build "$RUNNER_TEMP/test-build"
+          QT_QPA_PLATFORM=offscreen ctest --test-dir "$RUNNER_TEMP/test-build" --output-on-failure
+
+      - name: Build the package
+        run: |
+          tools/make-deb.sh "$RUNNER_TEMP/deb"
+          deb=$(ls "$RUNNER_TEMP"/deb/*.deb)
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          echo "DEB=$deb" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP }}-deb-${{ github.sha }}
+          path: ${{ env.DEB }}
+          if-no-files-found: error
+
+      - name: Release (tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DEB }}
+          generate_release_notes: true
+
+      - name: Clean up
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/test-build" "$RUNNER_TEMP/deb"

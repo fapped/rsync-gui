@@ -70,8 +70,9 @@
 - [ ] Nautilus / Nemo integration (scripts or an extension)
 - [x] `.deb` package: `tools/make-deb.sh` (CPack, dependencies from dpkg-shlibdeps), checked with apt in a
       clean Ubuntu 26.04 container (2026-11-15)
-- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option), CI (Gitea Actions:
-      build + tests + the .deb; needs a runner)
+- [x] CI on GitHub: `.github/workflows/deb.yml` (self-hosted runner: tests + the .deb, artifact, release for
+      tags `v*`) - its steps checked locally on a fresh clone; the first run on the runner not seen yet
+- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option)
 - [ ] Run rsync on the server / use ssh for network shares (docs/plan-server-side.md, steps 1-6 done 2026-11-15):
   - [ ] Checked by hand with the user's NAS: a CIFS share set up with *Detect* (testparm), a copy within a share
         on the server, local -> share over ssh, the ownership note (`force user` / masks)

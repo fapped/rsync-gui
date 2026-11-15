@@ -145,6 +145,22 @@ screenshots are taken by hand:
 tools/make-screenshots.sh
 ```
 
+### Continuous integration
+
+`.github/workflows/deb.yml` builds the package on GitHub with a **self-hosted runner**
+(`runs-on: [self-hosted]`): on every push to `main`, for tags `v*` and by hand (*Actions → deb → Run
+workflow*). It runs the tests (`ctest`, the remote ones are skipped), then `tools/make-deb.sh`, shows the
+package's control fields and files and uploads it as an artifact (`rsync-gui-deb-<commit>`); for a tag `v*`
+it attaches the package to a GitHub release.
+
+The runner needs `build-essential cmake ninja-build qt6-base-dev dpkg-dev file` and for the tests
+`rsync openssh-client`; missing packages are installed when its user may run `sudo` without a password, otherwise
+the job stops and names them. The package is built for the runner's distribution (the library versions
+come from it). There is deliberately no `pull_request` trigger - pull requests from forks would run their
+code on the runner's machine; in the repository settings (*Actions → General*) keep approval required for
+workflows from outside collaborators. The workflow runs on github.com only (Gitea Actions reads
+`.github/workflows` too).
+
 ## Presets
 
 Installed into `<prefix>/share/rsync-gui/presets/`:
