@@ -4,9 +4,12 @@
 # Deliberately no pull_request trigger: the runner is a machine of the owner, and pull requests from forks would
 # run their code on it. The job runs on github.com only - Gitea Actions also reads .github/workflows.
 #
-# The runner needs (Debian/Ubuntu): build-essential cmake ninja-build qt6-base-dev dpkg-dev file, and for the
+# The runner needs (Debian/Ubuntu): build-essential cmake ninja-build qt6-base-dev dpkg-dev file gh, and for the
 # tests: rsync openssh-client. Missing packages are installed when the runner's user may use sudo without a password;
 # otherwise the job stops and names them.
+#
+# The actions are pinned to the commits of their releases (the version in the comment), from the official
+# repositories (github.com/actions); they run on node24 - runner 2.327.0 or newer.
 name: deb
 
 on:
@@ -35,13 +38,15 @@ jobs:
     env:
       APP: rsync-gui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check the build dependencies
         run: |
           missing=()
           for pair in cmake:cmake ninja:ninja-build g++:g++ make:build-essential dpkg-shlibdeps:dpkg-dev \
-                      dpkg-deb:dpkg file:file rsync:rsync ssh:openssh-client; do
+                      dpkg-deb:dpkg file:file gh:gh rsync:rsync ssh:openssh-client; do
             cmd=${pair%%:*} pkg=${pair#*:}
             command -v "$cmd" > /dev/null || missing+=("$pkg")
           done
@@ -73,7 +78,7 @@ jobs:
           dpkg-deb --contents "$deb"
           echo "DEB=$deb" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.APP }}-deb-${{ github.sha }}
           path: ${{ env.DEB }}
@@ -81,10 +86,17 @@ jobs:
 
       - name: Release (tags)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.DEB }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # GitHub CLI (gh) instead of a third-party action: a new release with the package, or the package
+          # replaced in an existing one.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$DEB" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$DEB" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          fi
 
       - name: Clean up
         if: always()
