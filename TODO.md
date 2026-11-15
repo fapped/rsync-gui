@@ -72,8 +72,9 @@
 - [ ] Run rsync on the server / use ssh for network shares (docs/plan-server-side.md, steps 1-6 done 2026-11-15):
   - [ ] Checked by hand with the user's NAS: a CIFS share set up with *Detect* (testparm), a copy within a share
         on the server, local -> share over ssh, the ownership note (`force user` / masks)
-  - [ ] Optionally `--chmod` from Samba's `create mask` / `directory mask` for copies over ssh to a share
-  - [ ] Tests: a Samba share in the `tools/ssh-test` container for *Detect* (testparm; mounting CIFS needs root)
+  - [x] `--chmod` from Samba's masks and forced modes for copies over ssh to a share (*Modes* in the share dialog)
+  - [x] Tests: a Samba configuration in the `tools/ssh-test` container for *Detect* (testparm; mounting CIFS needs
+        root - checked by hand)
   - [ ] Tests with real sftp servers (by hand, with the user):
     - [ ] an account for sftp only (`ForceCommand internal-sftp`): the clear "did not run the command" error
           (checked once on 2026-11-15), and from step 2 on: detected by the probe before anything starts

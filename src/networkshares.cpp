@@ -215,10 +215,57 @@ QString NetworkShare::sharePathCommand(const QString &share)
 
 QString NetworkShare::ownershipCommand(const QString &share)
 {
-    return QStringLiteral("for p in 'force user' 'force group' 'create mask' 'directory mask'; do "
+    return QStringLiteral("for p in 'force user' 'force group' 'create mask' 'force create mode' 'directory mask' "
+                          "'force directory mode'; do "
                           "printf '%s=%s\\n' \"$p\" \"$(testparm -s --section-name=%1 --parameter-name=\"$p\" "
                           "2>/dev/null)\"; done")
         .arg(remoteShellQuote(share));
+}
+
+QMap<QString, QString> NetworkShare::parseParameters(const QByteArray &output)
+{
+    QMap<QString, QString> parameters;
+    for (const QString &line : QString::fromLocal8Bit(output).split(QLatin1Char('\n'))) {
+        const qsizetype eq = line.indexOf(QLatin1Char('='));
+        const QString value = eq > 0 ? line.mid(eq + 1).trimmed() : QString();
+        if (!value.isEmpty())
+            parameters.insert(line.left(eq).trimmed(), value);
+    }
+    return parameters;
+}
+
+QString NetworkShare::chmodFromSamba(const QMap<QString, QString> &parameters)
+{
+    const auto octal = [&parameters](const char *name, int fallback) {
+        bool ok = false;
+        const int value = parameters.value(QLatin1String(name)).toInt(&ok, 8);
+        return ok ? value & 0777 : fallback;
+    };
+    QStringList parts;
+    const auto add = [&parts](QChar kind, int mask, int force) {
+        static const char who[] = {'u', 'g', 'o'};
+        for (int i = 0; i < 3; ++i) {
+            const int shift = 6 - 3 * i;
+            const auto bits = [](int value) {
+                QString perms;
+                if (value & 4)
+                    perms += QLatin1Char('r');
+                if (value & 2)
+                    perms += QLatin1Char('w');
+                if (value & 1)
+                    perms += QLatin1Char('x');
+                return perms;
+            };
+            // Removed first, then forced: Samba ORs the forced bits after the mask.
+            if (const QString removed = bits((~mask >> shift) & 7); !removed.isEmpty())
+                parts << kind + QLatin1Char(who[i]) + QLatin1Char('-') + removed;
+            if (const QString added = bits((force >> shift) & 7); !added.isEmpty())
+                parts << kind + QLatin1Char(who[i]) + QLatin1Char('+') + added;
+        }
+    };
+    add(QLatin1Char('F'), octal("create mask", 0744), octal("force create mode", 0));
+    add(QLatin1Char('D'), octal("directory mask", 0755), octal("force directory mode", 0));
+    return parts.join(QLatin1Char(','));
 }
 
 Location ShareSettings::location(const QString &relative) const
@@ -252,6 +299,7 @@ ShareSettings ShareSettings::load(QSettings &settings, const QString &key)
     result.sshTarget = settings.value(QStringLiteral("sshTarget")).toString();
     result.port = settings.value(QStringLiteral("port"), 0).toInt();
     result.serverPath = settings.value(QStringLiteral("serverPath")).toString();
+    result.chmod = settings.value(QStringLiteral("chmod")).toString();
     settings.endGroup();
     return result;
 }
@@ -263,6 +311,7 @@ void ShareSettings::save(QSettings &settings, const QString &key) const
     settings.setValue(QStringLiteral("sshTarget"), sshTarget);
     settings.setValue(QStringLiteral("port"), port);
     settings.setValue(QStringLiteral("serverPath"), serverPath);
+    settings.setValue(QStringLiteral("chmod"), chmod);
     settings.endGroup();
 }
 
@@ -311,6 +360,10 @@ ShareRouting ShareRouting::route(const QList<Location> &sources, const Location 
 
     bool destMapped = false;
     result.destination = map(destination, &destMapped);
+    if (destMapped) {
+        if (const std::optional<NetworkShare> share = NetworkShare::of(mounts, destination.path))
+            result.destinationChmod = settings(share->key).chmod;
+    }
     if (destMapped)
         result.notes << QObject::tr("The destination %1 is reached over ssh: %2")
                             .arg(LocalPath::display(destination.path), LocalPath::display(result.destination.toString()));

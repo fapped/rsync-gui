@@ -484,8 +484,12 @@ rsync), Rsync GUI can use ssh instead of the mount:
   `~/.config/fapped/rsync-gui.conf` (`[shares]`).
 - *Run rsync on the server when the sources and the destination are on it* (`runOnServer`) off turns all of
   this off (e.g. in a preset).
-- Files copied over ssh are created by the **ssh user** with the modes rsync gives them (`-p`), not by Samba
-  (`force user`, `create mask`): *Detect* shows these Samba settings of the share when there are any.
+- Files copied over ssh are created by the **ssh user**, not by Samba. The **modes** Samba would give them
+  can be kept: *Detect* reads the share's `create mask`, `force create mode`, `directory mask` and `force
+  directory mode` and fills *Modes (--chmod)* with the same change in rsync's symbolic form (Samba sets
+  `(mode & mask) | force`, e.g. the defaults 0744/0755 give `Fg-wx,Fo-wx,Dg-w,Do-w`); it is added to copies
+  whose destination is on that share. The **owner** (`force user`, `force group`) cannot be kept without root
+  - *Detect* shows it.
 - The ssh port of an sshfs mount is not in the mount table: set it in the dialog (or in `~/.ssh/config`).
 - The paths stay local in the window, the log says where each one is reached over ssh, and the command
   preview shows the commands as they will run.

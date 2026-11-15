@@ -66,6 +66,12 @@ ShareDialog::ShareDialog(const NetworkShare &share, const ShareSettings &setting
     m_detectButton->setVisible(share.kind == NetworkShare::Kind::Cifs);
     pathRow->addWidget(m_detectButton);
     form->addRow(tr("Path on the server:"), pathRow);
+    m_chmodEdit = new QLineEdit(settings.chmod, this);
+    m_chmodEdit->setPlaceholderText(tr("e.g. Fg-wx,Fo-wx (empty: the modes of the sources)"));
+    m_chmodEdit->setToolTip(tr("rsync --chmod for copies to this share over ssh, so that files get the modes Samba "
+                               "would give them (Detect fills it from the share's create mask / directory mask). "
+                               "Empty: the modes are copied from the sources (-p)."));
+    form->addRow(tr("Modes (--chmod):"), m_chmodEdit);
     layout->addLayout(form);
 
     m_resultLabel = new QLabel(this);
@@ -108,6 +114,9 @@ ShareSettings ShareDialog::settings() const
     s.sshTarget = m_targetEdit->text().trimmed();
     s.port = m_portSpin->value();
     s.serverPath = m_pathEdit->text().trimmed();
+    s.chmod = m_chmodEdit->text().trimmed();
+    if (s.chmod.startsWith(QStringLiteral("--chmod=")))
+        s.chmod = s.chmod.mid(8);
     return s;
 }
 
@@ -168,19 +177,29 @@ void ShareDialog::detectPath()
                   if (!m_share.remotePath.isEmpty())
                       full += QLatin1Char('/') + m_share.remotePath;
                   m_pathEdit->setText(full);
-                  // Who Samba creates files as - over ssh it is the ssh user.
-                  QStringList notes;
-                  for (const QString &line : lines.mid(1)) {
-                      const qsizetype eq = line.indexOf(QLatin1Char('='));
-                      if (eq <= 0 || line.mid(eq + 1).trimmed().isEmpty())
-                          continue;
-                      notes << QStringLiteral("%1 = %2").arg(line.left(eq), line.mid(eq + 1).trimmed());
-                  }
+                  // The modes Samba gives new files -> --chmod; the owner it forces cannot be copied over ssh.
+                  const QMap<QString, QString> parameters =
+                      NetworkShare::parseParameters(lines.mid(1).join(QLatin1Char('\n')).toLocal8Bit());
+                  const QString chmod = NetworkShare::chmodFromSamba(parameters);
+                  m_chmodEdit->setText(chmod);
                   QString text = tr("The share \"%1\" is %2 on the server.").arg(m_share.share, path);
-                  if (!notes.isEmpty())
-                      text += tr("\nSamba creates files with: %1 - over ssh they belong to the ssh user and get "
-                                 "the modes from rsync (-p) instead.")
-                                  .arg(notes.join(QStringLiteral(", ")));
+                  QStringList modes;
+                  for (const char *name : {"create mask", "force create mode", "directory mask", "force directory mode"}) {
+                      if (parameters.contains(QLatin1String(name)))
+                          modes << QStringLiteral("%1 = %2").arg(QLatin1String(name), parameters.value(QLatin1String(name)));
+                  }
+                  if (!modes.isEmpty())
+                      text += tr("\nSamba: %1 - the same modes over ssh: %2")
+                                  .arg(modes.join(QStringLiteral(", ")), chmod.isEmpty() ? tr("nothing to change") : QStringLiteral("--chmod=") + chmod);
+                  QStringList owners;
+                  for (const char *name : {"force user", "force group"}) {
+                      if (parameters.contains(QLatin1String(name)))
+                          owners << QStringLiteral("%1 = %2").arg(QLatin1String(name), parameters.value(QLatin1String(name)));
+                  }
+                  if (!owners.isEmpty())
+                      text += tr("\nSamba creates files with %1 - over ssh they belong to the ssh user (rsync cannot "
+                                 "change the owner without root).")
+                                  .arg(owners.join(QStringLiteral(", ")));
                   m_resultLabel->setText(text);
               });
 }

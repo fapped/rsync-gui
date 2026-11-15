@@ -978,7 +978,11 @@ void MainWindow::updatePreview()
     const ShareRouting routing = ShareRouting::route(
         sources(), dest.isValid() ? dest : Location::parse(QStringLiteral("/DEST")), Mount::current(),
         [&store](const QString &key) { return ShareSettings::load(store, key); }, options.runOnServer, options.contentsOnly);
-    const RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
+    RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
+    if (!routing.destinationChmod.isEmpty()) {
+        for (RsyncJob::Transfer &transfer : plan.transfers)
+            transfer.extraArguments << QStringLiteral("--chmod=") + routing.destinationChmod;
+    }
     QStringList args = options.arguments(plan.transfers.isEmpty() ? 0 : plan.transfers.first().port);
     args << QStringLiteral("--");
     QString text;
@@ -1301,6 +1305,10 @@ void MainWindow::startCopy()
         return;
     }
     plan.missing = skipped + plan.missing;
+    if (!routing.destinationChmod.isEmpty()) {
+        for (RsyncJob::Transfer &transfer : plan.transfers)
+            transfer.extraArguments << QStringLiteral("--chmod=") + routing.destinationChmod;
+    }
     if (routing.throughNetworkTwice) {
         plan.notes << tr("Sources on a network share are copied to a network destination through this computer - the "
                          "data crosses the network twice. A share set up for ssh (File > Network shares) is copied "

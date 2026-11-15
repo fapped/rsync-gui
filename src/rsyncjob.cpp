@@ -457,9 +457,9 @@ QStringList RsyncJob::rsyncArguments(const Transfer &transfer, const RsyncOption
     // On the server rsync copies between its own paths: no remote shell for it.
     const int port = transfer.runsOnServer() ? RsyncOptions::NoRemoteShell : transfer.port;
     switch (pass) {
-    case Pass::Copy: return options.arguments(port);
+    case Pass::Copy: return options.arguments(port) + transfer.extraArguments;
     case Pass::Verify: return options.verifyArguments(port);
-    case Pass::Remove: return options.removalArguments(port);
+    case Pass::Remove: return options.removalArguments(port) + transfer.extraArguments;
     case Pass::CleanUp: return {};
     }
     return {};

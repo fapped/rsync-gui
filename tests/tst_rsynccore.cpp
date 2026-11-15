@@ -276,6 +276,7 @@ private slots:
     void networkShares();
     void shareSettings();
     void shareRouting();
+    void sambaChmod();
     void parseProgress_data();
     void parseProgress();
     void parseSizeAndRate_data();
@@ -347,6 +348,7 @@ private slots:
     void remoteOnServerMoveRemovesDirs();
     void remoteSharedConnection();
     void remoteSshfsShare();
+    void remoteSambaDetect();
     void remoteAskpassHostKeyAndPassword();
 };
 
@@ -1107,6 +1109,7 @@ void TestRsyncCore::shareRouting()
     nasVideo.use = ShareSettings::Use::Enabled;
     nasVideo.sshTarget = QStringLiteral("nas");
     nasVideo.serverPath = QStringLiteral("/volume1/video");
+    nasVideo.chmod = QStringLiteral("Fg-wx,Fo-wx");
     stored.insert("//nas/Video", nasVideo);
     ShareSettings otherPhotos = ShareSettings::detected(*NetworkShare::of(mounts, photos));
     otherPhotos.use = ShareSettings::Use::Enabled;
@@ -1121,6 +1124,9 @@ void TestRsyncCore::shareRouting()
     QCOMPARE(r.destination.toString(), QStringLiteral("nas:/volume1/video/backup"));
     QVERIFY(!r.throughNetworkTwice);
     QCOMPARE(r.notes.size(), 2);
+    QCOMPARE(r.destinationChmod, QStringLiteral("Fg-wx,Fo-wx")); // the destination's share
+    QCOMPARE(ShareRouting::route({Location::parse(video + "/dir")}, Location::parse(tmp.filePath("local")), mounts, lookup,
+                                 true).destinationChmod, QString()); // not for a local destination
     RsyncJob::Plan plan = RsyncJob::plan(r.sources, r.destination, RsyncOptions());
     QVERIFY2(plan.ok(), qPrintable(plan.error));
     QVERIFY(plan.transfers.first().runsOnServer());
@@ -1163,6 +1169,34 @@ void TestRsyncCore::shareRouting()
     r = ShareRouting::route({Location::parse("sftp://nas/x")}, Location::parse(video), mounts, lookup, true);
     QCOMPARE(r.sources.first(), Location::parse("sftp://nas/x"));
     QVERIFY(RsyncJob::plan(r.sources, r.destination, RsyncOptions()).transfers.first().runsOnServer());
+}
+
+void TestRsyncCore::sambaChmod()
+{
+    // Samba's defaults: create mask 0744, directory mask 0755.
+    QCOMPARE(NetworkShare::chmodFromSamba({}), QStringLiteral("Fg-wx,Fo-wx,Dg-w,Do-w"));
+    QCOMPARE(NetworkShare::chmodFromSamba({{"create mask", "0777"}, {"directory mask", "0777"}}), QString());
+    const QMap<QString, QString> parameters = NetworkShare::parseParameters(
+        "force user=tester\nforce group=\ncreate mask=0640\nforce create mode=0004\ndirectory mask=0750\n"
+        "force directory mode=0000\n");
+    QCOMPARE(parameters.value("force user"), QStringLiteral("tester"));
+    QVERIFY(!parameters.contains("force group"));
+    const QString chmod = NetworkShare::chmodFromSamba(parameters);
+    QCOMPARE(chmod, QStringLiteral("Fu-x,Fg-wx,Fo-rwx,Fo+r,Dg-w,Do-rwx"));
+    if (!haveRsync())
+        QSKIP("rsync is not installed");
+    // rsync applies it as Samba would: (mode & mask) | force.
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("src/d/f"), "f");
+    QCOMPARE(::chmod(QFile::encodeName(tmp.filePath("src/d/f")).constData(), 0777), 0);
+    QCOMPARE(::chmod(QFile::encodeName(tmp.filePath("src/d")).constData(), 0777), 0);
+    QCOMPARE(QProcess::execute("rsync", {"-a", "--chmod=" + chmod, tmp.filePath("src/d"), tmp.filePath("dest")}), 0);
+    struct stat st;
+    QCOMPARE(::stat(QFile::encodeName(tmp.filePath("dest/d/f")).constData(), &st), 0);
+    QCOMPARE(st.st_mode & 07777, mode_t(0644)); // 0777 & 0640 | 0004
+    QCOMPARE(::stat(QFile::encodeName(tmp.filePath("dest/d")).constData(), &st), 0);
+    QCOMPARE(st.st_mode & 07777, mode_t(0750));
 }
 
 void TestRsyncCore::parseProgress_data()
@@ -2942,6 +2976,31 @@ void TestRsyncCore::remoteSshfsShare()
     QVERIFY(job.summary().ok());
     QCOMPARE(server.run(QStringLiteral("cat '%1/share/dest/src/f'").arg(server.dir)), QByteArray("data"));
     QCOMPARE(readFile(mountPoint + "/dest/src/f"), QByteArray("data")); // and seen through the mount
+}
+
+void TestRsyncCore::remoteSambaDetect()
+{
+    // Detect in the share dialog: the path and the modes of a Samba share read with testparm over ssh.
+    RemoteServer server(QStringLiteral("samba"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QCOMPARE(server.run(NetworkShare::sharePathCommand("testshare")), QByteArray("/home/tester/samba\n"));
+    const QMap<QString, QString> parameters = NetworkShare::parseParameters(server.run(NetworkShare::ownershipCommand("testshare")));
+    QCOMPARE(parameters.value("force user"), QStringLiteral("tester"));
+    QCOMPARE(parameters.value("create mask"), QStringLiteral("0640"));
+    const QString chmod = NetworkShare::chmodFromSamba(parameters);
+    QCOMPARE(chmod, QStringLiteral("Fu-x,Fg-wx,Fo-rwx,Fo+r,Dg-w,Do-rwx"));
+
+    // A copy on the server with it: the modes Samba would give.
+    server.run(QStringLiteral("mkdir -p '%1/src/d' && printf f > '%1/src/d/f' && chmod 777 '%1/src/d' '%1/src/d/f'").arg(server.dir));
+    RsyncOptions options = server.options();
+    RsyncJob::Plan plan = RsyncJob::plan({server.at("src/d")}, server.at("dest"), options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    plan.transfers.first().extraArguments << "--chmod=" + chmod;
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(server.run(QStringLiteral("stat -c %a '%1/dest/d' '%1/dest/d/f'").arg(server.dir)), QByteArray("750\n644\n"));
 }
 
 void TestRsyncCore::remoteAskpassHostKeyAndPassword()

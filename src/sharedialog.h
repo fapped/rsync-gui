@@ -42,6 +42,7 @@ private:
     QLineEdit *m_targetEdit = nullptr;
     QSpinBox *m_portSpin = nullptr;
     QLineEdit *m_pathEdit = nullptr;
+    QLineEdit *m_chmodEdit = nullptr;
     QPushButton *m_detectButton = nullptr;
     QPushButton *m_testButton = nullptr;
     QLabel *m_resultLabel = nullptr;

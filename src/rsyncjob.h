@@ -38,6 +38,9 @@ public:
         QString host;
         // On the server: the destination is created first (mkdir -p), as the window does for local ones.
         bool createDestination = false;
+        // Options for this transfer only, after those of RsyncOptions (copy and removal passes), e.g. the --chmod of
+        // a network share reached over ssh.
+        QStringList extraArguments;
 
         bool runsOnServer() const { return !host.isEmpty(); }
     };

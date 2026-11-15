@@ -3,6 +3,7 @@
 #include "location.h"
 
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -51,8 +52,17 @@ struct NetworkShare
 
     // The remote command that prints the path of a Samba share on the server (testparm).
     static QString sharePathCommand(const QString &share);
-    // The remote command that prints the Samba parameters that decide the owner and the mode of new files.
+    // The remote command that prints the Samba parameters that decide the owner and the mode of new files,
+    // one "name=value" line each (force user, force group, create mask, force create mode, directory mask,
+    // force directory mode).
     static QString ownershipCommand(const QString &share);
+    // The "name=value" lines of ownershipCommand() (empty values left out).
+    static QMap<QString, QString> parseParameters(const QByteArray &output);
+    // rsync's --chmod value that gives files and directories copied over ssh the modes Samba would give them:
+    // Samba sets (mode & create mask) | force create mode (directory mask / force directory mode for
+    // directories), --chmod removes and adds the same bits symbolically, e.g. "Fg-wx,Fo-wx". Empty if nothing
+    // changes. Missing parameters take Samba's defaults (0744, 0755, 0000).
+    static QString chmodFromSamba(const QMap<QString, QString> &parameters);
 };
 
 // How a network share is reached over ssh (remembered per share, see load()/save()).
@@ -69,6 +79,7 @@ struct ShareSettings
     QString sshTarget;  // [user@]host
     int port = 0;
     QString serverPath; // the path of the mount point on the server ("~/x" or "x" relative to the home directory)
+    QString chmod;      // rsync --chmod for copies to the share over ssh (e.g. Samba's masks), empty = none
 
     bool isUsable() const { return use == Use::Enabled && !sshTarget.isEmpty() && !serverPath.isEmpty(); }
     // A location on the server for `relative` (a path inside the share).
@@ -92,6 +103,7 @@ struct ShareRouting
     QList<Location> sources;
     Location destination;
     QStringList notes;      // for the log: what goes where
+    QString destinationChmod; // --chmod of the share of a destination reached over ssh (ShareSettings::chmod)
     QStringList unsetKeys;  // shares used here that are not set up yet (Use::Unset), to offer setting them up
     QList<NetworkShare> unsetShares;
     bool throughNetworkTwice = false; // a source on a network mount copied to a network destination through here
