@@ -376,6 +376,10 @@ RsyncJob::RsyncJob(QList<Transfer> transfers, RsyncOptions options, QObject *par
     , m_options(std::move(options))
 {
     m_stepsPerTransfer = m_options.verifiedMove() ? 3 : m_options.canVerify() ? 2 : 1;
+    connect(this, &RsyncJob::log, this, [this](LogLevel level) {
+        if (m_running && (level == LogLevel::Warning || level == LogLevel::Error))
+            ++m_summary.warnings;
+    });
 }
 
 RsyncJob::~RsyncJob()

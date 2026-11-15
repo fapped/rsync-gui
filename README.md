@@ -283,8 +283,11 @@ These two screenshots are taken by hand (a real 24 GB copy, *Details* expanded),
 ## Close when finished
 
 The *Close when finished* checkbox next to the *Copy* button quits Rsync GUI 1.5 s after a
-successful transfer (unchecking it in the meantime keeps the window open). After errors,
-verification differences, cancelling or a dry run the window always stays open with the log.
+successful transfer (unchecking it in the meantime keeps the window open). Only a job that finished
+without a single warning or error in its log closes it. After errors, warnings (files that vanished during
+the transfer - rsync's exit code 24, source directories left in place after a move because they are not
+empty, emptied directories on the server that could not be removed...), verification differences,
+cancelling or a dry run the window always stays open with the log (*Finished with warnings - see the log.*).
 It is a window preference, remembered immediately — also in a window opened from Dolphin with a
 preset — and not part of the settings files or presets.
 

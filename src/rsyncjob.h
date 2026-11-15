@@ -126,6 +126,7 @@ public:
         int sourceDirsRemoved = 0; // emptied source directories removed after a move
         int sourcesRemoved = 0; // verified move: transfers whose sources were removed after the verification
         int removalFailed = 0;
+        int warnings = 0; // warnings and errors in the log of the job (rsync's, vanished files, directories left...)
         bool cancelled = false;
         bool aborted = false; // e.g. rsync could not be started
 
@@ -134,6 +135,8 @@ public:
             return !cancelled && !aborted && transfersFailed == 0 && verifyFailed == 0 && differences == 0
                 && removalFailed == 0;
         }
+        // Everything done without a single warning: e.g. for closing the window when finished.
+        bool clean() const { return ok() && transfersWithWarnings == 0 && warnings == 0; }
     };
 
     static Plan plan(const QList<Location> &sources, const Location &destination, const RsyncOptions &options);

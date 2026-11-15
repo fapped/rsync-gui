@@ -403,8 +403,9 @@ void MainWindow::buildUi()
     m_quitButton = new QPushButton(QIcon::fromTheme(QStringLiteral("application-exit")), tr("Quit"), central);
     m_quitButton->setToolTip(tr("Close Rsync GUI (during a transfer, asks first whether to cancel it)."));
     m_closeWhenFinishedCheck = new QCheckBox(tr("Close when finished"), central);
-    m_closeWhenFinishedCheck->setToolTip(tr("Quit Rsync GUI after a successful transfer. After errors, verification "
-                                            "differences, cancelling or a dry run the window stays open."));
+    m_closeWhenFinishedCheck->setToolTip(tr("Quit Rsync GUI after a successful transfer. After errors, warnings (e.g. files "
+                                            "that vanished, directories left in place), verification differences, "
+                                            "cancelling or a dry run the window stays open."));
     runRow->addWidget(m_progress, 1);
     runRow->addWidget(m_closeWhenFinishedCheck);
     runRow->addWidget(m_startButton);
@@ -1814,7 +1815,7 @@ void MainWindow::onJobFinished()
         }
     }
     refreshSources();
-    if (summary.ok() && m_closeWhenFinishedCheck->isChecked() && !m_job->options().dryRun) {
+    if (summary.clean() && m_closeWhenFinishedCheck->isChecked() && !m_job->options().dryRun) {
         // A short moment to see the result; unchecking the box in the meantime keeps the window open.
         m_resultLabel->setText(tr("Finished successfully. Closing..."));
         QTimer::singleShot(1500, this, [this] {
@@ -1822,8 +1823,12 @@ void MainWindow::onJobFinished()
                 close();
         });
     } else if (summary.ok()) {
-        m_resultLabel->setText(m_job->options().dryRun ? tr("Dry run finished - nothing was changed.")
-                                                       : tr("Finished successfully."));
+        if (m_job->options().dryRun)
+            m_resultLabel->setText(tr("Dry run finished - nothing was changed."));
+        else if (!summary.clean())
+            m_resultLabel->setText(tr("Finished with warnings - see the log."));
+        else
+            m_resultLabel->setText(tr("Finished successfully."));
     } else if (summary.cancelled) {
         m_resultLabel->setText(tr("Cancelled."));
     } else if (summary.differences > 0) {

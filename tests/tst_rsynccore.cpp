@@ -1793,6 +1793,9 @@ void TestRsyncCore::moveRemovesEmptiedDirectories()
     QCOMPARE(job.summary().sourceDirsRemoved, 2); // a/b, a
     QVERIFY(!QFileInfo::exists(tmp.filePath("src/a")));
     QCOMPARE(readFile(tmp.filePath("src/keep/skip.tmp")), QByteArray("excluded")); // not moved, stays
+    // "Source directory not empty - left in place": done, but with a warning (the window does not close).
+    QVERIFY(job.summary().warnings > 0);
+    QVERIFY(!job.summary().clean());
 
     // Contents only ("dir/"): the source directory itself stays.
     options.contentsOnly = true;
@@ -1800,6 +1803,7 @@ void TestRsyncCore::moveRemovesEmptiedDirectories()
     RsyncJob contents(localPlan({tmp.filePath("contents")}, dest, options).transfers, options);
     QVERIFY(runJob(contents));
     QVERIFY(contents.summary().ok());
+    QVERIFY(contents.summary().clean());
     QCOMPARE(readFile(dest + "/x/3"), QByteArray("3"));
     QVERIFY(!QFileInfo::exists(tmp.filePath("contents/x")));
     QVERIFY(QFileInfo(tmp.filePath("contents")).isDir());
