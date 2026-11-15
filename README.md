@@ -15,6 +15,9 @@ be passed as additional arguments.
   paste many paths (`Ctrl+V`, including files copied in Dolphin), drag & drop, paths on the command line,
 - **destination**: a local directory (created if missing) or a remote one, with a list of
   recently used destinations,
+- **copying on the server**: sources and a destination on the same host (e.g. two `sftp://`
+  locations of one server in Dolphin) are copied by rsync running there, over ssh - the data does not
+  go through this computer (see below),
 - the most useful **rsync options**: `-a` or its parts separately (`-r`, `-l`, `-p`, `-t`, `-g`, `-o`,
   `-D`, e.g. `-rlt`), `-H`, `-A`, `-X`, `-v`, `-h`, `--partial`,
   `--progress` / `--info=progress2`, `-c`, `-u`, `--ignore-existing`, `-z`, `--bwlimit`, `-e`,
@@ -86,7 +89,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The remote tests (copy to and from an ssh host with names that are not valid UTF-8, verified moves
-in both directions, cancelling, a password and an unknown host key answered through `SSH_ASKPASS`)
+in both directions, copying and a verified move on the server, cancelling (also of rsync on the server), a password and an unknown host key answered through `SSH_ASKPASS`)
 are skipped unless there is a test server. With Docker, this runs all tests against a throwaway
 container with sshd and rsync (Alpine), on `127.0.0.1:2222`, with a key and a `known_hosts` file of
 its own - `~/.ssh` is not used:
@@ -372,6 +375,7 @@ the list, presets are not listed there (they have *Load preset*).
         "useBwLimit": false,
         "useRemoteShell": false,
         "autoModifyWindow": true,
+        "runOnServer": true,
         "progress": "per-file",
         "existing": "replace"
     }
@@ -379,6 +383,8 @@ the list, presets are not listed there (they have *Load preset*).
 ```
 
 - `autoModifyWindow`: add `--modify-window=1` for FAT destinations (see above); `false` never adds it,
+- `runOnServer`: run rsync on the server when the sources and the destination are on it (see *Copying on
+  the server*); `false` refuses such a copy,
 - `progress`: `none`, `per-file` (`--progress`, `-P` with `partial`), `overall` (`--info=progress2`),
 - `existing`: `replace`, `skip-newer` (`-u`), `ignore-existing` (`--ignore-existing`),
 - `recursive`, `links`, `perms`, `times`, `group`, `owner`, `devices` (`-rlptgoD`) are used only
@@ -395,8 +401,9 @@ the list, presets are not listed there (they have *Load preset*).
   A source directory `dir` ends up as `<destination>/dir`, unless *Copy the contents of source
   directories* is enabled (`dir/` — only for local sources; remote paths are passed as typed).
 - rsync can read from only one remote host at a time, so the sources are grouped: all local
-  sources in one rsync run, and one run per remote host (and port). Copying between two remote
-  locations is not possible (rsync does not support it).
+  sources in one rsync run, and one run per remote host (and port). Sources on the same host as a
+  remote destination are copied by rsync on that host (next section); copying between two different
+  remote hosts is not possible (rsync does not support it).
 - Missing local sources are reported and can be skipped; duplicates are skipped.
 - **Moving**: `--remove-source-files` makes rsync remove each transferred file from the source, but
   it leaves all directories. With *Also remove source directories that are left empty*
@@ -408,6 +415,36 @@ the list, presets are not listed there (they have *Load preset*).
 - Copying a directory into itself (the destination inside a source directory) is refused.
 - Exit code 24 (some source files vanished during the transfer) is reported as a warning,
   other non-zero exit codes as errors, with the meaning of the code.
+
+## Copying on the server
+
+rsync cannot copy between two remote locations, and copying through this computer would send every byte
+over the network twice. When the sources and the destination are on the **same host** (the same user,
+host and port - e.g. two `sftp://` locations of one server browsed in Dolphin), rsync is started **on that
+host** over ssh and copies between its own paths:
+
+```
+ssh -- user@nas "rsync -avhP -- '/volume1/Photos 2024' /volume1/Backup/"
+```
+
+- On by default: *Run rsync on the server when the sources and the destination are on it* in the options
+  (`runOnServer`). Turned off, such a copy is refused, as before.
+- The server needs `rsync` in the `PATH` of the ssh user and a POSIX login shell (sh, dash, bash, busybox
+  ash - the command is quoted for it, also names that are not valid UTF-8). The *Program* option is the local
+  rsync; on the server it is always `rsync`. The custom remote shell (`-e`), if set, is the ssh command used.
+- Progress, the file counter, verification (also on the server) and verified moves work as for local
+  copies; the log and the command preview show the whole `ssh` command.
+- **Cancelling**: ending the local ssh does not stop rsync on the server at once (without a terminal it
+  notices only when it next writes). The remote command reports the PID of its rsync first
+  (`echo RSYNC-GUI-PID $$; exec rsync ...`), and *Cancel* stops it with `ssh host kill -TERM <pid>`; the local
+  ssh is terminated after 5 s if it is still running.
+- Not done on the server yet: checking that the sources exist and the free space, creating the destination
+  (rsync creates the last directory; `--mkpath` in the additional arguments creates all), the total size for
+  the speed graph, removing emptied source directories after a move. The destination inside a source
+  directory is refused by comparing the paths (symlinks are not resolved). The verification may read the
+  copies from the server's page cache.
+- Sources from other hosts (or local ones) in the same job are copied as before, each group by its own
+  rsync run.
 
 ## File names that are not valid UTF-8
 

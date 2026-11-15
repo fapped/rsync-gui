@@ -28,12 +28,38 @@ public:
     // One rsync process (plus one for the verification pass).
     struct Transfer
     {
-        QStringList sources; // rsync arguments (local paths or user@host:path)
+        QStringList sources; // rsync arguments (local paths or user@host:path; the host's paths with `host`)
         QString destination; // rsync argument, always ending with "/"
-        int port = 0;        // ssh port for the remote side, 0 = default
+        int port = 0;        // ssh port for the remote side (or of `host`), 0 = default
         QString description; // "local files" or the remote origin, for the log
         QStringList sourceDirs; // local source directories (for removing them after a move)
+        // Non-empty ("[user@]host"): the sources and the destination are on this host and rsync runs there,
+        // started over ssh - the data does not go through this computer.
+        QString host;
+
+        bool runsOnServer() const { return !host.isEmpty(); }
     };
+
+    // The rsync runs of a transfer: the copy, the verification, the removal of the sources of a verified move.
+    enum class Pass { Copy, Verify, Remove };
+
+    // The process to start for one run of a transfer.
+    struct Command
+    {
+        QString program;
+        QStringList arguments;
+        // For the log and the preview: a command line for a local shell. The remote command of a transfer
+        // on the server is shown in double quotes when that is easier to read than '...'\''...'.
+        QString display() const;
+    };
+    // The local rsync, or for a transfer that runs on the server: ssh [-p N] -- host 'rsync ... -- SRC DST/'.
+    // With `reportPid` the remote command first prints "RSYNC-GUI-PID <pid>" (the PID of the remote rsync,
+    // which replaces the shell with exec), so that cancelling can stop it (see cancel()).
+    static Command command(const Transfer &transfer, const RsyncOptions &options, Pass pass, bool reportPid = false);
+    // The options of the rsync of a pass (without the sources and the destination).
+    static QStringList rsyncArguments(const Transfer &transfer, const RsyncOptions &options, Pass pass);
+    // The first line printed by a command with `reportPid`.
+    static constexpr const char *PidLinePrefix = "RSYNC-GUI-PID ";
 
     struct Plan
     {
@@ -167,14 +193,16 @@ signals:
     void finished();
 
 private:
-    enum class Phase { Copy, Verify, Remove }; // Remove: the last pass of a verified move
+    using Phase = Pass; // Remove: the last pass of a verified move
 
     void startNext();
     void startProcess();
     // Before the verification of a local destination: drops the copies from the page cache (in a thread).
     void startVerify();
     void onCacheDropped(const CacheDropResult &result);
-    void setRawArguments(QProcess *process, const QStringList &args) const;
+    static void setRawArguments(QProcess *process, const QString &program, const QStringList &args);
+    // Stops the rsync of a transfer that runs on the server: ssh host kill -TERM <pid> (detached).
+    void killRemote();
     void onReadyRead();
     void handleLine(const QString &line);
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
@@ -205,6 +233,8 @@ private:
     FileCount m_filesBefore;   // the finished copy passes
     bool m_running = false;
     bool m_cancelRequested = false;
+    bool m_awaitingPid = false; // a transfer on the server: the first line is the PID of the remote rsync
+    qint64 m_remotePid = 0;
     std::shared_ptr<std::atomic<bool>> m_dropCancel; // set while the page cache is being dropped
     QPointer<QThread> m_dropThread;
 };

@@ -54,6 +54,9 @@
 - [x] *Save the log to a file* under the log (an option like the others, on by default) - `RunLog`,
       one file per run in `~/.local/state/rsync-gui/logs`
 - [x] *Quit* button next to *Copy* and *Cancel*
+- [x] rsync on the server for sources and a destination on the same remote host (`sftp://`, `host:path`):
+      `ssh host 'rsync ...'`, arguments quoted for a POSIX shell (also names that are not valid UTF-8),
+      cancelling by the PID of the remote rsync, option *Run on the server* (step 1 of docs/plan-server-side.md)
 
 ## To do
 
@@ -67,13 +70,10 @@
   - [ ] Mounted shares from `/proc/self/mountinfo`: sshfs gives `host:/path` directly; CIFS gives `//host/share`,
         the path of the share on the server read once with `ssh host testparm -s --section-name=SHARE
         --parameter-name=path` (Samba), remembered and editable in the settings
-  - [ ] The same for `sftp://` sources and destinations on the same host (Dolphin browsing a server)
   - [ ] Choosing the transfer: both on the same host → rsync on the server with the server's paths; one side
         local → rsync over ssh instead of through the mount (delta transfer, times and permissions kept);
         otherwise through the mount as now, with a warning that the data crosses the network twice
-  - [ ] An option "Run on the server when possible" (on by default); the full `ssh host rsync …` in the command preview
-  - [ ] Arguments quoted for the remote shell (also names that are not valid UTF-8)
-  - [ ] Cancelling: killing the local ssh does not stop the remote rsync at once (`ssh -tt`, or the remote PID + `kill`)
+  - [ ] One ssh login per job (`ControlMaster`): with a password, the cancel kill asks again today
   - [ ] Checks done over ssh: sources exist, the destination is not inside a source, free space (`df`),
         total size for the progress and the graph (`du`); removing emptied source directories after a move
   - [ ] Files are created by the ssh user, not by Samba: warn when the share uses `force user` / `force group`,

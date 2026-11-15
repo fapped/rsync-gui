@@ -144,6 +144,7 @@ private:
     QLineEdit *m_bwLimitEdit = nullptr;
     QCheckBox *m_remoteShellCheck = nullptr;
     QLineEdit *m_remoteShellEdit = nullptr;
+    QCheckBox *m_runOnServerCheck = nullptr;
     QCheckBox *m_contentsCheck = nullptr;
     QCheckBox *m_deleteCheck = nullptr;
     QCheckBox *m_removeSourceCheck = nullptr;

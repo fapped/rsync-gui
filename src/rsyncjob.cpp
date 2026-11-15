@@ -85,6 +85,10 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
     QString destSpec = destination.rsyncSpec();
     if (!destSpec.endsWith(QLatin1Char('/')))
         destSpec += QLatin1Char('/'); // always copy *into* the destination directory
+    // The destination as a path on its host, for transfers that run there.
+    QString destOnHost = destination.path;
+    if (!destOnHost.endsWith(QLatin1Char('/')))
+        destOnHost += QLatin1Char('/');
     const QString destCanonical = destination.isRemote() ? QString() : canonicalOrClean(destination.path);
 
     QHash<QString, qsizetype> transferByOrigin;
@@ -95,10 +99,29 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
             continue;
         QString spec = source.rsyncSpec();
         QString sourceDir;
+        bool onServer = false;
         if (source.isRemote()) {
             if (destination.isRemote()) {
-                errors << tr("%1: rsync cannot copy between two remote locations.").arg(source.toString());
-                continue;
+                if (source.originKey() != destination.originKey()) {
+                    errors << tr("%1: rsync cannot copy between two remote hosts.").arg(source.toString());
+                    continue;
+                }
+                if (!options.runOnServer) {
+                    errors << tr("%1: the source and the destination are on the same host - turn on \"Run on the "
+                                 "server\" to copy there, rsync itself cannot copy between two remote locations.")
+                                  .arg(source.toString());
+                    continue;
+                }
+                // Only the names can be compared here (no symlinks resolved): a directory copied into itself.
+                const QString sourcePath = QDir::cleanPath(source.path);
+                const QString destPath = QDir::cleanPath(destination.path);
+                if (isInside(destPath, sourcePath)) {
+                    errors << tr("The destination %1 is inside the source directory %2.")
+                                  .arg(destination.toString(), source.toString());
+                    continue;
+                }
+                onServer = true;
+                spec = source.path;
             }
         } else {
             if (!localExists(source.path)) {
@@ -119,19 +142,24 @@ RsyncJob::Plan RsyncJob::plan(const QList<Location> &sources, const Location &de
         }
 
         const QString key = source.originKey() + QLatin1Char('\n') + spec;
+        // A transfer on the server and one from the same host to here are different processes.
+        const QString origin = onServer ? QStringLiteral("server\n") + source.originKey() : source.originKey();
         if (seen.contains(key)) {
             result.notes << tr("Duplicate source skipped: %1").arg(LocalPath::display(source.toString()));
             continue;
         }
         seen << key;
 
-        const QString origin = source.originKey();
         auto it = transferByOrigin.constFind(origin);
         if (it == transferByOrigin.cend()) {
             Transfer transfer;
-            transfer.destination = destSpec;
+            transfer.destination = onServer ? destOnHost : destSpec;
             transfer.port = source.isRemote() ? source.port : destination.port;
-            if (!source.isRemote())
+            if (onServer) {
+                transfer.host = source.user.isEmpty() ? source.host : source.user + QLatin1Char('@') + source.host;
+                transfer.description = source.port > 0 ? tr("on %1 (port %2)").arg(source.host).arg(source.port)
+                                                       : tr("on %1").arg(source.host);
+            } else if (!source.isRemote())
                 transfer.description = tr("local files");
             else if (source.port > 0)
                 transfer.description = tr("from %1 (port %2)").arg(source.host).arg(source.port);
@@ -325,6 +353,7 @@ QString RsyncJob::exitCodeDescription(int code)
     case 25: return tr("the --max-delete limit stopped deletions");
     case 30: return tr("timeout in data send/receive");
     case 35: return tr("timeout waiting for the daemon connection");
+    case 127: return tr("command not found (is rsync installed on the server?)");
     case 255: return tr("remote shell (ssh) error");
     default: return tr("error");
     }
@@ -347,6 +376,7 @@ RsyncJob::~RsyncJob()
     }
     if (m_process) {
         m_process->disconnect(this);
+        killRemote(); // (quitting during a transfer on the server)
         m_process->kill();
         m_process->waitForFinished(2000);
     }
@@ -377,13 +407,38 @@ void RsyncJob::cancel()
     if (m_dropCancel)
         m_dropCancel->store(true);
     if (m_process && m_process->state() != QProcess::NotRunning) {
-        m_process->terminate();
         QPointer<QProcess> process = m_process;
-        QTimer::singleShot(3000, this, [process] {
+        int terminateAfter = 0;
+        if (m_index < m_transfers.size() && m_transfers.at(m_index).runsOnServer()) {
+            // Ending the local ssh does not stop rsync on the server at once (without a terminal it notices only
+            // when it next writes, which may be never). It is stopped by its PID; ssh then ends by itself with
+            // rsync's exit code. Without the PID yet: as soon as it arrives (handleLine()).
+            if (m_remotePid > 0)
+                killRemote();
+            terminateAfter = 5000;
+        }
+        QTimer::singleShot(terminateAfter, this, [process] {
+            if (process && process->state() != QProcess::NotRunning)
+                process->terminate();
+        });
+        QTimer::singleShot(terminateAfter + 3000, this, [process] {
             if (process && process->state() != QProcess::NotRunning)
                 process->kill();
         });
     }
+}
+
+void RsyncJob::killRemote()
+{
+    if (m_remotePid <= 0 || m_index >= m_transfers.size())
+        return;
+    const Transfer &transfer = m_transfers.at(m_index);
+    QStringList ssh = m_options.sshCommand(transfer.port);
+    const QString program = ssh.takeFirst();
+    ssh << QStringLiteral("--") << transfer.host << QStringLiteral("kill -TERM %1").arg(m_remotePid);
+    emit log(LogLevel::Info, QStringLiteral("$ ") + commandLine(program, ssh));
+    QProcess::startDetached(program, ssh);
+    m_remotePid = 0;
 }
 
 void RsyncJob::startNext()
@@ -396,32 +451,76 @@ void RsyncJob::startNext()
     startProcess();
 }
 
+QStringList RsyncJob::rsyncArguments(const Transfer &transfer, const RsyncOptions &options, Pass pass)
+{
+    // On the server rsync copies between its own paths: no remote shell for it.
+    const int port = transfer.runsOnServer() ? RsyncOptions::NoRemoteShell : transfer.port;
+    switch (pass) {
+    case Pass::Copy: return options.arguments(port);
+    case Pass::Verify: return options.verifyArguments(port);
+    case Pass::Remove: return options.removalArguments(port);
+    }
+    return {};
+}
+
+RsyncJob::Command RsyncJob::command(const Transfer &transfer, const RsyncOptions &options, Pass pass, bool reportPid)
+{
+    QStringList args = rsyncArguments(transfer, options, pass);
+    args << QStringLiteral("--");
+    if (!transfer.runsOnServer())
+        return {options.program, args << transfer.sources << transfer.destination};
+
+    // One command line for the login shell on the server (ssh joins its arguments with spaces anyway).
+    // The local `program` is a path on this computer - on the server it is "rsync" from the PATH.
+    QStringList words{QStringLiteral("rsync")};
+    for (const QString &arg : std::as_const(args))
+        words << remoteShellQuote(arg);
+    for (const QString &source : transfer.sources)
+        words << remotePathQuote(source);
+    words << remotePathQuote(transfer.destination);
+    QString remote = words.join(QLatin1Char(' '));
+    if (reportPid)
+        remote = QStringLiteral("echo %1$$; exec ").arg(QLatin1String(PidLinePrefix)) + remote;
+    QStringList ssh = options.sshCommand(transfer.port);
+    const QString program = ssh.takeFirst();
+    // "--": a host name from a URL cannot be taken for an ssh option.
+    return {program, ssh << QStringLiteral("--") << transfer.host << remote};
+}
+
+QString RsyncJob::Command::display() const
+{
+    const QString line = commandLine(program, arguments);
+    if (arguments.isEmpty())
+        return line;
+    const QString remote = arguments.last();
+    // Only when it pays off (single quotes inside) and is safe: no "!" (history expansion in an interactive
+    // bash) and only valid UTF-8 (otherwise shellQuote's $'...' keeps the bytes exact).
+    if (!remote.contains(QLatin1Char('\'')) || remote.contains(QLatin1Char('!')) || !LocalPath::isPlain(remote))
+        return line;
+    QString quoted = remote;
+    for (const QChar c : {QLatin1Char('\\'), QLatin1Char('"'), QLatin1Char('$'), QLatin1Char('`')})
+        quoted.replace(c, QStringLiteral("\\") + c);
+    const QStringList head = arguments.mid(0, arguments.size() - 1);
+    return commandLine(program, head) + QStringLiteral(" \"") + quoted + QLatin1Char('"');
+}
+
 void RsyncJob::startProcess()
 {
     const Transfer &transfer = m_transfers.at(m_index);
-    QStringList args;
     QString phase;
     switch (m_phase) {
-    case Phase::Copy:
-        args = m_options.arguments(transfer.port);
-        phase = tr("Copying");
-        break;
-    case Phase::Verify:
-        args = m_options.verifyArguments(transfer.port);
-        phase = tr("Verifying");
-        break;
-    case Phase::Remove:
-        args = m_options.removalArguments(transfer.port);
-        phase = tr("Removing the sources");
-        break;
+    case Phase::Copy: phase = tr("Copying"); break;
+    case Phase::Verify: phase = tr("Verifying"); break;
+    case Phase::Remove: phase = tr("Removing the sources"); break;
     }
-    args << QStringLiteral("--") << transfer.sources << transfer.destination;
+    const Command cmd = command(transfer, m_options, m_phase, true);
+    const QStringList &args = cmd.arguments;
 
     if (m_transfers.size() > 1)
         phase = tr("%1 %2 (%3/%4)").arg(phase, transfer.description).arg(m_index + 1).arg(m_transfers.size());
     emit phaseChanged(phase);
     emit log(LogLevel::Info, QStringLiteral("--- %1 ---").arg(phase));
-    emit log(LogLevel::Info, QStringLiteral("$ ") + commandLine(m_options.program, args));
+    emit log(LogLevel::Info, QStringLiteral("$ ") + cmd.display());
     emit statusChanged(QString());
     emitProgress(0.0);
 
@@ -430,7 +529,9 @@ void RsyncJob::startProcess()
     m_lastTotal = 0;
     m_lastTotalFinal = false;
     m_lastTransferred = 0;
-    m_humanLevel = humanLevel(args);
+    m_humanLevel = humanLevel(rsyncArguments(transfer, m_options, m_phase));
+    m_awaitingPid = transfer.runsOnServer();
+    m_remotePid = 0;
     m_completedBytes = 0;
     m_processedBytes = 0;
     m_lastTransferNumber = 0; // (the bytes of a finished copy are already in m_bytesBefore)
@@ -440,20 +541,20 @@ void RsyncJob::startProcess()
     connect(m_process, &QProcess::readyRead, this, &RsyncJob::onReadyRead);
     connect(m_process, &QProcess::finished, this, &RsyncJob::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &RsyncJob::onProcessError);
-    setRawArguments(m_process, args);
-    m_process->start(m_options.program, args);
+    setRawArguments(m_process, cmd.program, args);
+    m_process->start(cmd.program, args);
 }
 
-void RsyncJob::setRawArguments(QProcess *process, const QStringList &args) const
+void RsyncJob::setRawArguments(QProcess *process, const QString &programName, const QStringList &args)
 {
     // QProcess passes arguments as UTF-8, which would change file names that are not valid UTF-8
     // (see LocalPath). For such arguments the child process execs rsync itself with the exact bytes;
     // if that fails, QProcess continues with its own exec, which then fails the same way.
     if (std::all_of(args.cbegin(), args.cend(), [](const QString &arg) { return LocalPath::isPlain(arg); }))
         return;
-    const QString program = m_options.program.contains(QLatin1Char('/'))
-        ? m_options.program
-        : QStandardPaths::findExecutable(m_options.program);
+    const QString program = programName.contains(QLatin1Char('/'))
+        ? programName
+        : QStandardPaths::findExecutable(programName);
     if (program.isEmpty())
         return;
     auto bytes = std::make_shared<std::vector<QByteArray>>();
@@ -490,6 +591,13 @@ void RsyncJob::handleLine(const QString &rawLine)
     const QString line = rawLine.trimmed();
     if (line.isEmpty())
         return;
+    if (m_awaitingPid && line.startsWith(QLatin1String(PidLinePrefix))) {
+        m_awaitingPid = false;
+        m_remotePid = line.mid(qstrlen(PidLinePrefix)).toLongLong();
+        if (m_cancelRequested)
+            killRemote(); // cancelled before the PID was known
+        return;
+    }
 
     ProgressInfo info;
     if (parseProgressLine(line, &info, m_humanLevel)) {
@@ -671,7 +779,7 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 void RsyncJob::startVerify()
 {
     const Transfer &transfer = m_transfers.at(m_index);
-    if (Location::parse(transfer.destination).isRemote()) {
+    if (transfer.runsOnServer() || Location::parse(transfer.destination).isRemote()) {
         emit log(LogLevel::Info, tr("The destination is remote: the verification may read the copies from the "
                                     "server's memory (its page cache) instead of its disk."));
         startProcess();

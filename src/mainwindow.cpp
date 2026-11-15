@@ -299,6 +299,14 @@ void MainWindow::buildUi()
     shellRow->addWidget(m_remoteShellCheck);
     shellRow->addWidget(m_remoteShellEdit, 1);
     form->addRow(tr("Remote shell:"), shellRow);
+    m_runOnServerCheck = new QCheckBox(tr("Run rsync on the server when the sources and the destination are on it"),
+                                       m_optionsBox);
+    m_runOnServerCheck->setToolTip(tr("Sources and a destination on the same host (e.g. two sftp:// locations of one "
+                                      "server): rsync is started there over ssh (ssh host rsync ...), so the data "
+                                      "does not go through this computer. The server needs rsync and a POSIX shell "
+                                      "(sh, bash) for the ssh user.\nTurned off, such a copy is refused - rsync "
+                                      "itself cannot copy between two remote locations."));
+    form->addRow(QString(), m_runOnServerCheck);
 
     m_contentsCheck = new QCheckBox(tr("Copy the contents of source directories, not the directories themselves"),
                                     m_optionsBox);
@@ -506,7 +514,7 @@ void MainWindow::buildUi()
         connect(box, &QCheckBox::toggled, this, refresh);
     for (QCheckBox *box : {m_archiveCheck, m_hardLinksCheck, m_aclsCheck, m_xattrsCheck,
                            m_checksumCheck, m_partialCheck, m_verboseCheck, m_humanCheck, m_compressCheck,
-                           m_bwLimitCheck, m_remoteShellCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck, m_removeSourceDirsCheck,
+                           m_bwLimitCheck, m_remoteShellCheck, m_runOnServerCheck, m_contentsCheck, m_deleteCheck, m_removeSourceCheck, m_removeSourceDirsCheck,
                            m_dryRunCheck, m_verifyCheck, m_autoModifyWindowCheck, m_logToFileCheck}) {
         connect(box, &QCheckBox::toggled, this, refresh);
     }
@@ -692,6 +700,7 @@ RsyncOptions MainWindow::currentOptions() const
     o.bwLimit = m_bwLimitEdit->text().trimmed();
     o.useRemoteShell = m_remoteShellCheck->isChecked();
     o.remoteShell = m_remoteShellEdit->text().trimmed();
+    o.runOnServer = m_runOnServerCheck->isChecked();
     o.contentsOnly = m_contentsCheck->isChecked();
     o.deleteExtraneous = m_deleteCheck->isChecked();
     o.removeSourceFiles = m_removeSourceCheck->isChecked();
@@ -730,6 +739,7 @@ void MainWindow::applyOptions(const RsyncOptions &o)
     m_bwLimitEdit->setText(o.bwLimit);
     m_remoteShellCheck->setChecked(o.useRemoteShell);
     m_remoteShellEdit->setText(o.remoteShell);
+    m_runOnServerCheck->setChecked(o.runOnServer);
     m_contentsCheck->setChecked(o.contentsOnly);
     m_deleteCheck->setChecked(o.deleteExtraneous);
     m_removeSourceCheck->setChecked(o.removeSourceFiles);
@@ -967,11 +977,14 @@ void MainWindow::updatePreview()
     if (plan.transfers.isEmpty()) {
         text = commandLine(options.program, args) + tr(" <sources> ")
             + (dest.isValid() ? shellQuote(dest.rsyncSpec() + QLatin1Char('/')) : tr("<destination>/"));
+    } else if (dest.isValid()) {
+        text = RsyncJob::command(plan.transfers.first(), options, RsyncJob::Pass::Copy).display();
+        if (plan.transfers.size() > 1)
+            text += tr("   (+ %1 more rsync run(s) for other hosts)").arg(plan.transfers.size() - 1);
     } else {
         const RsyncJob::Transfer &first = plan.transfers.first();
         args << first.sources;
-        text = commandLine(options.program, args) + QLatin1Char(' ')
-            + (dest.isValid() ? shellQuote(first.destination) : tr("<destination>/"));
+        text = commandLine(options.program, args) + tr(" <destination>/");
         if (plan.transfers.size() > 1)
             text += tr("   (+ %1 more rsync run(s) for other hosts)").arg(plan.transfers.size() - 1);
     }
@@ -1261,10 +1274,7 @@ void MainWindow::startCopy()
     if (!options.dryRun && (options.deleteExtraneous || options.removeSourceFiles)) {
         QStringList commands;
         for (const RsyncJob::Transfer &transfer : std::as_const(plan.transfers)) {
-            commands << commandLine(options.program, options.arguments(transfer.port) << QStringLiteral("--")
-                                                                                         << transfer.sources
-                                                                                         << transfer.destination)
-                            .toHtmlEscaped();
+            commands << RsyncJob::command(transfer, options, RsyncJob::Pass::Copy).display().toHtmlEscaped();
         }
         QString text;
         if (options.deleteExtraneous)

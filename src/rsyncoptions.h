@@ -61,6 +61,10 @@ struct RsyncOptions
     bool autoModifyWindow = true;
     // Not an rsync option: the log of each run is also written to a file (see RunLog). On by default.
     bool logToFile = true;
+    // Not an rsync option: when the sources and the destination are on the same remote host, rsync runs on
+    // that host (over ssh), so the data does not go through this computer. Off: such a copy is refused, as
+    // rsync itself cannot copy between two remote locations.
+    bool runOnServer = true;
     // Not an option of the window and not saved: set for a run when the destination keeps file times
     // less precisely than rsync compares them (FAT: 2 s), see RsyncJob::modifyWindowFor().
     int modifyWindow = 0;      // --modify-window (with -t, unless given in extraArguments)
@@ -73,7 +77,13 @@ struct RsyncOptions
     // The options of the verification pass: a dry run that lists files whose content
     // differs (--checksum --itemize-changes), without changing anything.
     QStringList verifyArguments(int port = 0) const;
+    // "-e <shell>" for rsync (with "-p <port>" when `port` > 0), or nothing. A negative `port` (NoRemoteShell)
+    // gives nothing: for the arguments of an rsync that runs on the server and copies between its own paths.
     QStringList remoteShellArguments(int port) const;
+    static constexpr int NoRemoteShell = -1;
+    // The ssh command (program first) used to reach a host: the custom remote shell (-e) or "ssh", with
+    // "-p <port>" when `port` > 0.
+    QStringList sshCommand(int port) const;
     // The flags that decide what is copied, for preset labels: "-a", "-ac", "-rlt", "-a --delete".
     // Output and progress flags (-v -h -P), -n and the removal of sources (a move) are left out.
     QString summaryFlags() const;
@@ -140,6 +150,12 @@ struct RsyncPreset
 };
 
 QString shellQuote(const QString &arg);
+// Quotes an argument for a POSIX shell on another host (sh, dash, busybox ash, bash): '...' with '\'' for
+// quotes. Unlike shellQuote() no bash-only $'...': bytes that are not valid UTF-8 (escaped, see LocalPath)
+// stay inside the quotes and are passed as the bytes they stand for.
+QString remoteShellQuote(const QString &arg);
+// remoteShellQuote() for a path; a leading "~" or "~/" is left unquoted, so that the remote shell expands it.
+QString remotePathQuote(const QString &path);
 QString commandLine(const QString &program, const QStringList &args);
 // Splits a command line like a POSIX shell (quotes and backslashes); returns false on unbalanced quotes.
 bool splitArguments(const QString &text, QStringList *out);

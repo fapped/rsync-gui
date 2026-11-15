@@ -78,6 +78,7 @@ constexpr BoolOption kBoolOptions[] = {
     {"useRemoteShell", &RsyncOptions::useRemoteShell},
     {"autoModifyWindow", &RsyncOptions::autoModifyWindow},
     {"logToFile", &RsyncOptions::logToFile},
+    {"runOnServer", &RsyncOptions::runOnServer},
 };
 
 struct StringOption
@@ -277,12 +278,26 @@ QString RsyncOptions::label(const QString &name) const
 
 QStringList RsyncOptions::remoteShellArguments(int port) const
 {
+    if (port < 0)
+        return {};
     QString shell = useRemoteShell ? remoteShell.trimmed() : QString();
     if (port > 0)
         shell = (shell.isEmpty() ? QStringLiteral("ssh") : shell) + QStringLiteral(" -p ") + QString::number(port);
     if (shell.isEmpty())
         return {};
     return {QStringLiteral("-e"), shell};
+}
+
+QStringList RsyncOptions::sshCommand(int port) const
+{
+    QStringList command;
+    if (useRemoteShell)
+        splitArguments(remoteShell.trimmed(), &command);
+    if (command.isEmpty())
+        command << QStringLiteral("ssh");
+    if (port > 0)
+        command << QStringLiteral("-p") << QString::number(port);
+    return command;
 }
 
 QStringList RsyncOptions::extraArgumentList() const
@@ -592,6 +607,25 @@ QString shellQuote(const QString &arg)
     QString quoted = arg;
     quoted.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
     return QLatin1Char('\'') + quoted + QLatin1Char('\'');
+}
+
+QString remoteShellQuote(const QString &arg)
+{
+    static const QRegularExpression safe(QStringLiteral("^[A-Za-z0-9_@%+=:,./-]+$"));
+    if (!arg.isEmpty() && LocalPath::isPlain(arg) && safe.match(arg).hasMatch())
+        return arg;
+    QString quoted = arg;
+    quoted.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QLatin1Char('\'') + quoted + QLatin1Char('\'');
+}
+
+QString remotePathQuote(const QString &path)
+{
+    if (path == QStringLiteral("~") || path == QStringLiteral("~/"))
+        return path;
+    if (path.startsWith(QStringLiteral("~/")))
+        return QStringLiteral("~/") + remoteShellQuote(path.mid(2));
+    return remoteShellQuote(path);
 }
 
 QString commandLine(const QString &program, const QStringList &args)
