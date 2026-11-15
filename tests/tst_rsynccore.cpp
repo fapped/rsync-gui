@@ -288,6 +288,7 @@ private slots:
     void humanLevel();
     void processedBytes_data();
     void processedBytes();
+    void fileListTotal();
     void fileCountText();
     void parseDifference_data();
     void parseDifference();
@@ -363,10 +364,13 @@ void TestRsyncCore::initTestCase()
     QStandardPaths::setTestModeEnabled(true);
 }
 
+// With progress, the whole file list is built first so that its total is known from the start.
+static const QStringList kFileList{"--no-inc-recursive", "--info=flist2"};
+
 void TestRsyncCore::defaultArguments()
 {
     // The defaults reproduce the "Copy (rsync)" command used before: rsync -avhP.
-    QCOMPARE(RsyncOptions().arguments(), QStringList{QStringLiteral("-avhP")});
+    QCOMPARE(RsyncOptions().arguments(), QStringList{QStringLiteral("-avhP")} + kFileList);
 }
 
 void TestRsyncCore::arguments_data()
@@ -374,24 +378,24 @@ void TestRsyncCore::arguments_data()
     QTest::addColumn<QString>("change");
     QTest::addColumn<QStringList>("expected");
 
-    QTest::newRow("checksum") << "checksum" << QStringList{"-avhPc"};
-    QTest::newRow("no partial") << "nopartial" << QStringList{"-avh", "--progress"};
-    QTest::newRow("overall") << "overall" << QStringList{"-avh", "--partial", "--info=progress2"};
+    QTest::newRow("checksum") << "checksum" << QStringList{"-avhPc"} + kFileList;
+    QTest::newRow("no partial") << "nopartial" << QStringList{"-avh", "--progress"} + kFileList;
+    QTest::newRow("overall") << "overall" << QStringList{"-avh", "--partial", "--info=progress2"} + kFileList;
     QTest::newRow("no progress") << "noprogress" << QStringList{"-avh", "--partial"};
     // Without -a its parts are listed one by one; by default they equal -a.
-    QTest::newRow("no archive") << "noarchive" << QStringList{"-rlptgoDvhP"};
-    QTest::newRow("rlt") << "rlt" << QStringList{"-rltvhP"};
-    QTest::newRow("parts ignored with archive") << "archiveparts" << QStringList{"-avhP"};
+    QTest::newRow("no archive") << "noarchive" << QStringList{"-rlptgoDvhP"} + kFileList;
+    QTest::newRow("rlt") << "rlt" << QStringList{"-rltvhP"} + kFileList;
+    QTest::newRow("parts ignored with archive") << "archiveparts" << QStringList{"-avhP"} + kFileList;
     QTest::newRow("no archive, nothing preserved") << "flat" << QStringList{"-vhP"};
-    QTest::newRow("preserve all") << "preserve" << QStringList{"-aHAXvhP"};
-    QTest::newRow("update") << "update" << QStringList{"-avhPu"};
-    QTest::newRow("ignore existing") << "ignore" << QStringList{"-avhP", "--ignore-existing"};
-    QTest::newRow("compress, dry run") << "zn" << QStringList{"-avhPzn"};
-    QTest::newRow("delete") << "delete" << QStringList{"-avhP", "--delete"};
-    QTest::newRow("move") << "move" << QStringList{"-avhP", "--remove-source-files"};
-    QTest::newRow("bwlimit") << "bwlimit" << QStringList{"-avhP", "--bwlimit=10M"};
+    QTest::newRow("preserve all") << "preserve" << QStringList{"-aHAXvhP"} + kFileList;
+    QTest::newRow("update") << "update" << QStringList{"-avhPu"} + kFileList;
+    QTest::newRow("ignore existing") << "ignore" << QStringList{"-avhP", "--ignore-existing"} + kFileList;
+    QTest::newRow("compress, dry run") << "zn" << QStringList{"-avhPzn"} + kFileList;
+    QTest::newRow("delete") << "delete" << QStringList{"-avhP", "--delete"} + kFileList;
+    QTest::newRow("move") << "move" << QStringList{"-avhP", "--remove-source-files"} + kFileList;
+    QTest::newRow("bwlimit") << "bwlimit" << QStringList{"-avhP", "--bwlimit=10M"} + kFileList;
     QTest::newRow("extra") << "extra"
-                           << QStringList{"-avhP", "--exclude=*.tmp", "--exclude", "a b", "--mkpath"};
+                           << QStringList{"-avhP", "--no-inc-recursive", "--info=flist2", "--exclude=*.tmp", "--exclude", "a b", "--mkpath"};
     QTest::newRow("nothing") << "nothing" << QStringList{};
 }
 
@@ -481,7 +485,7 @@ void TestRsyncCore::remoteShell()
     o.remoteShell = "ssh -i ~/.ssh/key";
     QCOMPARE(o.remoteShellArguments(0), (QStringList{"-e", "ssh -i ~/.ssh/key"}));
     QCOMPARE(o.remoteShellArguments(2222), (QStringList{"-e", "ssh -i ~/.ssh/key -p 2222"}));
-    QCOMPARE(o.arguments(2222), (QStringList{"-avhP", "-e", "ssh -i ~/.ssh/key -p 2222"}));
+    QCOMPARE(o.arguments(2222), (QStringList{"-avhP", "--no-inc-recursive", "--info=flist2", "-e", "ssh -i ~/.ssh/key -p 2222"}));
     // The shell text is ignored while the option is off.
     o.useRemoteShell = false;
     QCOMPARE(o.remoteShellArguments(0), QStringList());
@@ -752,8 +756,8 @@ void TestRsyncCore::commandOnServer()
     RsyncJob::Command c = RsyncJob::command(t, o, RsyncJob::Pass::Copy);
     QCOMPARE(c.program, QStringLiteral("ssh"));
     QCOMPARE(c.arguments, (QStringList{"-p", "2222", "--", "u@h",
-                                       "rsync -avhP -- /a '/b c' 'it'\\''s' ~/'dest dir/'"}));
-    QCOMPARE(c.display(), QStringLiteral("ssh -p 2222 -- u@h \"rsync -avhP -- /a '/b c' 'it'\\\\''s' ~/'dest dir/'\""));
+                                       "rsync -avhP --no-inc-recursive --info=flist2 -- /a '/b c' 'it'\\''s' ~/'dest dir/'"}));
+    QCOMPARE(c.display(), QStringLiteral("ssh -p 2222 -- u@h \"rsync -avhP --no-inc-recursive --info=flist2 -- /a '/b c' 'it'\\\\''s' ~/'dest dir/'\""));
     // The displayed command is the same command for a local shell.
     {
         QProcess sh;
@@ -768,7 +772,7 @@ void TestRsyncCore::commandOnServer()
     c = RsyncJob::command(t, o, RsyncJob::Pass::Copy, true);
     QCOMPARE(c.arguments.mid(0, 6), (QStringList{"-i", "/k k", "-p", "2222", "--", "u@h"}));
     QCOMPARE(c.arguments.last(),
-             QStringLiteral("echo RSYNC-GUI-PID $$; exec rsync -avhP -- /a '/b c' 'it'\\''s' ~/'dest dir/'"));
+             QStringLiteral("echo RSYNC-GUI-PID $$; exec rsync -avhP --no-inc-recursive --info=flist2 -- /a '/b c' 'it'\\''s' ~/'dest dir/'"));
     o.verifyAfter = true;
     c = RsyncJob::command(t, o, RsyncJob::Pass::Verify);
     QVERIFY2(c.arguments.last().startsWith("rsync -nrlci '--out-format=%i %n%L' -- /a"), qPrintable(c.arguments.last()));
@@ -862,7 +866,7 @@ void TestRsyncCore::sshSharing()
     t.destination = QStringLiteral("new dir/");
     t.createDestination = true;
     QCOMPARE(RsyncJob::command(t, RsyncOptions(), RsyncJob::Pass::Copy, true).arguments.last(),
-             QStringLiteral("echo RSYNC-GUI-PID $$; mkdir -p './new dir/' && exec rsync -avhP -- /a 'new dir/'"));
+             QStringLiteral("echo RSYNC-GUI-PID $$; mkdir -p './new dir/' && exec rsync -avhP --no-inc-recursive --info=flist2 -- /a 'new dir/'"));
     QCOMPARE(RsyncJob::command(t, RsyncOptions(), RsyncJob::Pass::Verify).arguments.last(),
              QStringLiteral("rsync -nrlci '--out-format=%i %n%L' -- /a 'new dir/'"));
 }
@@ -1444,6 +1448,10 @@ void TestRsyncCore::processedBytes()
     QVERIFY(!rates.isEmpty());
     // "src", "src/a", "src/c", "src/sub", "src/sub/b" - three of them files that were copied.
     QVERIFY(!files.isEmpty());
+    // The total is known before the first file is finished (--no-inc-recursive --info=flist2).
+    QCOMPARE(files.constFirst().total, 5);
+    QCOMPARE(files.constFirst().checked, 0);
+    QVERIFY(files.constFirst().totalFinal);
     QCOMPARE(files.constLast().checked, 5);
     QCOMPARE(files.constLast().total, 5);
     QVERIFY(files.constLast().totalFinal);
@@ -1457,6 +1465,24 @@ void TestRsyncCore::processedBytes()
     QVERIFY2(qAbs(processed - 600000) <= (human ? 5000 : 0), qPrintable(QString::number(processed)));
     for (const QList<QVariant> &args : std::as_const(rates))
         QVERIFY(args.at(0).toLongLong() >= 0);
+}
+
+void TestRsyncCore::fileListTotal()
+{
+    QCOMPARE(RsyncJob::parseFileListTotal(QStringLiteral("1501 files to consider")), 1501);
+    QCOMPARE(RsyncJob::parseFileListTotal(QStringLiteral("1 file to consider")), 1);
+    QCOMPARE(RsyncJob::parseFileListTotal(QStringLiteral("receiving file list ... 3 files to consider")), 3);
+    QCOMPARE(RsyncJob::parseFileListTotal(QStringLiteral(" 100 files...")), -1);
+    QCOMPARE(RsyncJob::parseFileListTotal(QStringLiteral("building file list ... ")), -1);
+
+    // Only with progress and recursion; an explicit (--no-)inc-recursive of the extra arguments wins.
+    RsyncOptions options;
+    QVERIFY(options.arguments().contains(QStringLiteral("--no-inc-recursive")));
+    options.extraArguments = QStringLiteral("--inc-recursive");
+    QVERIFY(!options.arguments().contains(QStringLiteral("--no-inc-recursive")));
+    options.extraArguments.clear();
+    options.progress = RsyncOptions::Progress::None;
+    QVERIFY(!options.arguments().contains(QStringLiteral("--info=flist2")));
 }
 
 void TestRsyncCore::fileCountText()
@@ -2092,12 +2118,12 @@ void TestRsyncCore::shippedPresets_data()
     QTest::addColumn<QStringList>("arguments");
     QTest::addColumn<bool>("verify");
     // The presets reproduce the former Dolphin actions "Copy (rsync)" and "Copy (rsync + verify)".
-    QTest::newRow("rsync-copy") << "rsync-copy" << QStringList{"-avhP"} << false;
-    QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} << true;
-    QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} << false;
-    QTest::newRow("rsync-move") << "rsync-move" << QStringList{"-avhP", "--remove-source-files"} << false;
-    QTest::newRow("rsync-move-verify") << "rsync-move-verify" << QStringList{"-avhPc"} << true;
-    QTest::newRow("rsync-move-portable") << "rsync-move-portable" << QStringList{"-rltvhP", "--remove-source-files"}
+    QTest::newRow("rsync-copy") << "rsync-copy" << QStringList{"-avhP"} + kFileList << false;
+    QTest::newRow("rsync-copy-verify") << "rsync-copy-verify" << QStringList{"-avhPc"} + kFileList << true;
+    QTest::newRow("rsync-copy-portable") << "rsync-copy-portable" << QStringList{"-rltvhP"} + kFileList << false;
+    QTest::newRow("rsync-move") << "rsync-move" << QStringList{"-avhP", "--remove-source-files"} + kFileList << false;
+    QTest::newRow("rsync-move-verify") << "rsync-move-verify" << QStringList{"-avhPc"} + kFileList << true;
+    QTest::newRow("rsync-move-portable") << "rsync-move-portable" << QStringList{"-rltvhP", "--remove-source-files"} + kFileList
                                          << false;
 }
 

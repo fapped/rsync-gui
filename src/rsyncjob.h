@@ -137,6 +137,8 @@ public:
     };
 
     static Plan plan(const QList<Location> &sources, const Location &destination, const RsyncOptions &options);
+    // The total of "N files to consider" (--info=flist2), -1 for other lines.
+    static int parseFileListTotal(const QString &line);
     // Parses an rsync --progress / --info=progress2 line.
     // `humanLevel` is the number of -h options + 1, as in rsync: 1 = plain numbers with thousands
     // separators, 2 = units of 1000 ("4,62M"), 3 = units of 1024. The rate is always in units of 1024.

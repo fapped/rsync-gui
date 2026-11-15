@@ -209,6 +209,16 @@ QStringList RsyncOptions::buildArguments(int port, bool removeSources) const
     if (useBwLimit)
         longOptions << QStringLiteral("--bwlimit=") + bwLimit.trimmed();
     const QStringList extra = extraArgumentList();
+    // The whole file list before the transfer ("1501 files to consider"): the file counter has its total from
+    // the start, not only after the first file (rsync reports the counts at the end of each file). Without it
+    // (incremental recursion) the list is built during the transfer and the total is not known in advance.
+    if (progress != Progress::None && (archive || recursive)
+        && std::none_of(extra.cbegin(), extra.cend(), [](const QString &arg) {
+               return arg.contains(QLatin1String("inc-recursive")) || arg == QLatin1String("--i-r")
+                   || arg == QLatin1String("--no-i-r");
+           })) {
+        longOptions << QStringLiteral("--no-inc-recursive") << QStringLiteral("--info=flist2");
+    }
     if (modifyWindow > 0 && (archive || times)
         && std::none_of(extra.cbegin(), extra.cend(), [](const QString &arg) {
                return arg.startsWith(QLatin1String("--modify-window")) || arg.startsWith(QLatin1String("-@"));

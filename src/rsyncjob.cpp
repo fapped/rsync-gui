@@ -211,6 +211,16 @@ bool RsyncJob::parseProgressLine(const QString &line, ProgressInfo *info, int hu
     return true;
 }
 
+int RsyncJob::parseFileListTotal(const QString &line)
+{
+    // "1501 files to consider", "1 file to consider" (--info=flist2 without incremental recursion); on the same line
+    // as "receiving file list ... " when no " 100 files..." came between them.
+    static const QRegularExpression re(
+        QStringLiteral("^(?:(?:receiving|building) file list \\.\\.\\.\\s*)?([0-9]+) files? to consider$"));
+    const QRegularExpressionMatch m = re.match(line.trimmed());
+    return m.hasMatch() ? m.captured(1).toInt() : -1;
+}
+
 namespace {
 
 // "4,62" or "4.62" (the decimal separator follows the locale of rsync).
@@ -650,6 +660,25 @@ void RsyncJob::handleLine(const QString &rawLine)
         m_remotePid = line.mid(qstrlen(PidLinePrefix)).toLongLong();
         if (m_cancelRequested)
             killRemote(); // cancelled before the PID was known
+        return;
+    }
+
+    // --info=flist2: " 100 files..." while the list is built (not logged), then "1501 files to consider".
+    static const QRegularExpression buildingRe(QStringLiteral("^[0-9]+ files\\.\\.\\.$"));
+    if (buildingRe.match(line).hasMatch())
+        return;
+    if (const int total = parseFileListTotal(line); total >= 0) {
+        if (m_phase == Phase::Copy && total > m_lastTotal) {
+            m_lastTotal = total;
+            m_lastTotalFinal = true;
+            FileCount count = m_filesBefore;
+            count.checked += m_lastDone;
+            count.total += m_lastTotal;
+            count.transferred += m_lastTransferred;
+            count.totalFinal = m_index + 1 >= m_transfers.size();
+            emit filesChanged(count);
+        }
+        emit log(LogLevel::Output, line);
         return;
     }
 

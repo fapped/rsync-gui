@@ -245,10 +245,15 @@ transfers of the job, e.g. *Checked: 1,200 / 5,000+ (3,800+ left) · transferred
 
 - *checked* counts every entry of the file list - directories too, and files that are up to date and
   not copied; *transferred* counts the files rsync actually copied,
+- the total is there from the start: with progress shown and recursion the window adds
+  `--no-inc-recursive --info=flist2`, so rsync builds the whole file list first and prints its size
+  (*1,501 files to consider*) - otherwise the counts would come only when the first file is finished,
+  which can take minutes with a large file. Building the list first takes a moment for a large tree
+  and some memory (about 100 bytes per entry); `--inc-recursive` in *Extra arguments* turns it off,
 - a **+** means the total is not final yet: rsync builds the file list while copying (incremental
-  recursion) and adds to it as it goes, or more transfers follow,
-- with *Progress: None* and in a dry run rsync reports nothing, so there is no counter; with per-file
-  progress rsync prints nothing for a transfer in which everything is up to date either.
+  recursion, when turned on as above) and adds to it as it goes, or more transfers follow,
+- with *Progress: None* rsync reports nothing, so there is no counter; in a dry run there is only the
+  total.
 
 ## Progress outside the window
 
