@@ -2451,42 +2451,56 @@ void TestRsyncCore::deleteJobDuringCacheDrop()
 {
     if (!haveRsync())
         QSKIP("rsync is not installed");
-    QTemporaryDir tmp;
-    QVERIFY(tmp.isValid());
-    for (int i = 0; i < 2000; ++i)
-        writeFile(tmp.filePath(QStringLiteral("src/f%1").arg(i)), "x");
-    const QString dest = tmp.filePath("dest");
-    QVERIFY(QDir().mkpath(dest));
+    // The cache drop thread, found by its name - counting all threads of the process is not reliable (Qt's thread
+    // pool, glib, ... start and end threads of their own).
+    const auto dropThreads = [] {
+        int count = 0;
+        const QDir tasks(QStringLiteral("/proc/self/task"));
+        for (const QString &task : tasks.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (readFile(tasks.filePath(task + QStringLiteral("/comm"))).trimmed() == RsyncJob::CacheDropThreadName)
+                ++count;
+        }
+        return count;
+    };
 
-    // E.g. the window is closed: the destructor stops the thread and waits for it, nothing is called afterwards.
-    RsyncOptions options = testOptions();
-    options.verifyAfter = true;
-    auto *job = new RsyncJob(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
-    QPointer<RsyncJob> guard = job;
-    bool finished = false;
-    const auto threads = [] { return QDir(QStringLiteral("/proc/self/task")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(); };
-    const qsizetype threadsBefore = threads();
-    qsizetype threadsDuring = 0;
-    qsizetype threadsAfter = 0;
-    connect(job, &RsyncJob::finished, this, [&finished] { finished = true; });
-    connect(job, &RsyncJob::phaseChanged, this, [&, job](const QString &phase) {
-        if (phase != QLatin1String("Writing to the disk"))
-            return;
-        QTimer::singleShot(0, job, [&, job] {
-            threadsDuring = threads();
-            delete job;
-            threadsAfter = threads(); // the thread has ended, not just been left behind
+    // The thread has to be still running when the job is deleted; on fast storage it may be done before that, then
+    // again with more files.
+    for (const int files : {2000, 20000}) {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        for (int i = 0; i < files; ++i)
+            writeFile(tmp.filePath(QStringLiteral("src/f%1").arg(i)), "x");
+        const QString dest = tmp.filePath("dest");
+        QVERIFY(QDir().mkpath(dest));
+
+        // E.g. the window is closed: the destructor stops the thread and waits for it, nothing is called afterwards.
+        RsyncOptions options = testOptions();
+        options.verifyAfter = true;
+        auto *job = new RsyncJob(localPlan({tmp.filePath("src")}, dest, options).transfers, options);
+        QPointer<RsyncJob> guard = job;
+        bool finished = false;
+        int during = -1;
+        int after = -1;
+        connect(job, &RsyncJob::finished, this, [&finished] { finished = true; });
+        connect(job, &RsyncJob::phaseChanged, this, [&, job](const QString &phase) {
+            if (phase != QLatin1String("Writing to the disk"))
+                return;
+            QTimer::singleShot(0, job, [&, job] {
+                during = dropThreads();
+                delete job;
+                after = dropThreads(); // the thread has ended, not just been left behind
+            });
         });
-    });
-    job->start();
-    QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 30000);
-    QTest::qWait(200); // a queued call from the thread would arrive now
-    QVERIFY(!finished);
-    QVERIFY2(threadsDuring > threadsBefore, "the cache was not being dropped in a thread when the job was deleted");
-    // The thread has ended by the time delete returns. Compared with the count right before the delete, not with
-    // the one at the start: other threads (Qt's thread pool) may start or end in the meantime.
-    QVERIFY2(threadsAfter < threadsDuring, qPrintable(QStringLiteral("%1 threads before the delete, %2 after")
-                                                          .arg(threadsDuring).arg(threadsAfter)));
+        job->start();
+        QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 60000);
+        QTest::qWait(200); // a queued call from the thread would arrive now
+        QVERIFY(!finished);
+        QCOMPARE(after, 0);
+        if (during == 1)
+            return; // deleted while the thread was running
+        QCOMPARE(during, 0); // done before the delete: try with more files
+    }
+    QSKIP("The cache was dropped before the job could be deleted, even with 20000 files (fast storage).");
 }
 
 void TestRsyncCore::speedHistoryAverages()

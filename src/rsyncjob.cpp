@@ -912,6 +912,9 @@ void RsyncJob::startVerify()
     QThread *thread = QThread::create([paths = destinationPaths(transfer), cancel = m_dropCancel, result] {
         *result = dropFromPageCache(paths, cancel.get());
     });
+    // The name of the system thread (/proc/<pid>/task/<tid>/comm, at most 15 characters): visible in top/ps, and
+    // the tests find it by it.
+    thread->setObjectName(QString::fromLatin1(CacheDropThreadName));
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     connect(thread, &QThread::finished, this, [this, result] { onCacheDropped(*result); });
     m_dropThread = thread;
