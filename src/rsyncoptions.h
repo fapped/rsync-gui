@@ -68,6 +68,10 @@ struct RsyncOptions
     // Not an option of the window and not saved: set for a run when the destination keeps file times
     // less precisely than rsync compares them (FAT: 2 s), see RsyncJob::modifyWindowFor().
     int modifyWindow = 0;      // --modify-window (with -t, unless given in extraArguments)
+    // Not an option of the window and not saved: set for a run, so that all ssh connections of a job to one host
+    // share one login (one password question instead of one per rsync run and check). Empty: not shared.
+    // Used only when the remote shell is ssh. See sshSharingArguments().
+    QString sshControlPath;
 
     // The options for a copy. `port` (if non-zero) is added to the remote shell command.
     // For a verified move (see verifiedMove()) the copy does not remove the sources yet.
@@ -84,6 +88,12 @@ struct RsyncOptions
     // The ssh command (program first) used to reach a host: the custom remote shell (-e) or "ssh", with
     // "-p <port>" when `port` > 0.
     QStringList sshCommand(int port) const;
+    // "-o ControlMaster=auto -o ControlPersist=60 -o ControlPath=<sshControlPath>" for an ssh command `program`
+    // (empty when sshControlPath is empty or the program is not ssh).
+    QStringList sshSharingArguments(const QString &program) const;
+    // A ControlPath for sshControlPath in the runtime directory of the user (created, readable by the user only);
+    // empty if there is none.
+    static QString defaultSshControlPath();
     // The flags that decide what is copied, for preset labels: "-a", "-ac", "-rlt", "-a --delete".
     // Output and progress flags (-v -h -P), -n and the removal of sources (a move) are left out.
     QString summaryFlags() const;

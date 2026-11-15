@@ -2,16 +2,19 @@
 
 #include "desktopprogress.h"
 #include "location.h"
+#include "remoteprobe.h"
 #include "rsyncjob.h"
 #include "runlog.h"
 #include "rsyncoptions.h"
 
 #include <QDate>
+#include <QHash>
 #include <QMainWindow>
 #include <QPointer>
 
 #include <atomic>
 #include <memory>
+#include <optional>
 
 class QAction;
 class QCheckBox;
@@ -91,6 +94,13 @@ private:
     void exportSettings();
     void showAbout();
     void startCopy();
+    // Transfers that run on a server: checks the servers first (asynchronously, see RemoteProbe), then continues
+    // with continueCopy(). Returns false if there is nothing to check.
+    bool checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan);
+    void onServersChecked();
+    // The rest of startCopy() after the checks: FAT, the confirmation of deleting options, the start.
+    void continueCopy(RsyncOptions options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos);
+    bool isBusy() const; // a job runs or the servers are being checked
     void cancelCopy();
     void startDesktopProgress(const RsyncOptions &options, const Location &dest);
     void measureSourcesForDesktopProgress(const RsyncOptions &options);
@@ -175,6 +185,17 @@ private:
     RunLog m_runLog; // open while a run with logToFile goes on
 
     QPointer<RsyncJob> m_job;
+    // A copy waiting for the checks of its servers.
+    struct PendingCopy
+    {
+        RsyncOptions options;
+        Location dest;
+        RsyncJob::Plan plan;
+        QHash<int, RemoteProbe::Result> results; // by the index of the transfer
+        QList<QPointer<RemoteProbe>> probes;
+    };
+    std::optional<PendingCopy> m_pending;
+    QPointer<QProcess> m_remoteMeasure; // du on the server for the total size
     QDate m_logDate; // the date of the last log line - a new day gets a line of its own
     DesktopProgress *m_desktopProgress = nullptr;
     std::shared_ptr<std::atomic_bool> m_measureCancel; // stops measuring the sources

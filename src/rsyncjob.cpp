@@ -1,5 +1,6 @@
 #include "rsyncjob.h"
 #include "localpath.h"
+#include "remoteprobe.h"
 
 #include <QDir>
 #include <QFile>
@@ -459,12 +460,51 @@ QStringList RsyncJob::rsyncArguments(const Transfer &transfer, const RsyncOption
     case Pass::Copy: return options.arguments(port);
     case Pass::Verify: return options.verifyArguments(port);
     case Pass::Remove: return options.removalArguments(port);
+    case Pass::CleanUp: return {};
     }
     return {};
 }
 
+namespace {
+
+// Removes the empty directories in each directory (deepest first; with "keep" the directory itself stays) - only
+// rmdir, so nothing that is not empty is touched; symlinks are not followed, other file systems are not entered.
+// Prints for each: "removed" NUL dir NUL count NUL, then the directories left, "left" NUL dir NUL (POSIX sh, busybox).
+const char *const kCleanUpScript = R"SH(while [ $# -gt 1 ]; do
+    k=$1
+    d=$2
+    shift 2
+    if [ ! -d "$d" ] || [ -L "${d%/}" ]; then continue; fi
+    b=$(find "$d" -xdev -type d | wc -l)
+    if [ "$k" = keep ]; then
+        find "$d" -xdev -mindepth 1 -depth -type d -exec rmdir {} \; 2>/dev/null
+    else
+        find "$d" -xdev -depth -type d -exec rmdir {} \; 2>/dev/null
+    fi
+    a=0
+    if [ -d "$d" ]; then a=$(find "$d" -xdev -type d | wc -l); fi
+    printf 'removed\0%s\0%s\0' "$d" $((b - a))
+    if [ -d "$d" ]; then find "$d" -xdev -type d -exec printf 'left\0%s\0' {} \; ; fi
+done
+)SH";
+
+} // namespace
+
 RsyncJob::Command RsyncJob::command(const Transfer &transfer, const RsyncOptions &options, Pass pass, bool reportPid)
 {
+    if (pass == Pass::CleanUp) {
+        QStringList words{QStringLiteral("sh"), QStringLiteral("-c"), remoteShellQuote(QString::fromUtf8(kCleanUpScript)),
+                          QStringLiteral("rsync-gui-cleanup")};
+        for (const QString &source : transfer.sources) {
+            // With a trailing "/" only the content was moved - the directory itself stays.
+            words << (source.endsWith(QLatin1Char('/')) || options.contentsOnly ? QStringLiteral("keep")
+                                                                                 : QStringLiteral("all"))
+                  << remoteScriptPath(source);
+        }
+        QStringList ssh = options.sshCommand(transfer.port);
+        const QString program = ssh.takeFirst();
+        return {program, ssh << QStringLiteral("--") << transfer.host << words.join(QLatin1Char(' '))};
+    }
     QStringList args = rsyncArguments(transfer, options, pass);
     args << QStringLiteral("--");
     if (!transfer.runsOnServer())
@@ -479,8 +519,13 @@ RsyncJob::Command RsyncJob::command(const Transfer &transfer, const RsyncOptions
         words << remotePathQuote(source);
     words << remotePathQuote(transfer.destination);
     QString remote = words.join(QLatin1Char(' '));
+    if (pass == Pass::Copy && transfer.createDestination)
+        remote = QStringLiteral("mkdir -p ") + remoteScriptPath(transfer.destination) + QStringLiteral(" && exec ")
+            + remote;
+    else if (reportPid)
+        remote = QStringLiteral("exec ") + remote;
     if (reportPid)
-        remote = QStringLiteral("echo %1$$; exec ").arg(QLatin1String(PidLinePrefix)) + remote;
+        remote = QStringLiteral("echo %1$$; ").arg(QLatin1String(PidLinePrefix)) + remote;
     QStringList ssh = options.sshCommand(transfer.port);
     const QString program = ssh.takeFirst();
     // "--": a host name from a URL cannot be taken for an ssh option.
@@ -512,8 +557,9 @@ void RsyncJob::startProcess()
     case Phase::Copy: phase = tr("Copying"); break;
     case Phase::Verify: phase = tr("Verifying"); break;
     case Phase::Remove: phase = tr("Removing the sources"); break;
+    case Phase::CleanUp: phase = tr("Removing emptied source directories"); break;
     }
-    const Command cmd = command(transfer, m_options, m_phase, true);
+    const Command cmd = command(transfer, m_options, m_phase, m_phase != Phase::CleanUp);
     const QStringList &args = cmd.arguments;
 
     if (m_transfers.size() > 1)
@@ -530,7 +576,8 @@ void RsyncJob::startProcess()
     m_lastTotalFinal = false;
     m_lastTransferred = 0;
     m_humanLevel = humanLevel(rsyncArguments(transfer, m_options, m_phase));
-    m_awaitingPid = transfer.runsOnServer();
+    m_awaitingPid = transfer.runsOnServer() && m_phase != Phase::CleanUp;
+    m_cleanUpOutput.clear();
     m_remotePid = 0;
     m_completedBytes = 0;
     m_processedBytes = 0;
@@ -573,6 +620,10 @@ void RsyncJob::onReadyRead()
 {
     if (!m_process)
         return;
+    if (m_phase == Phase::CleanUp) {
+        m_cleanUpOutput += m_process->readAll(); // NUL-separated records, parsed at the end
+        return;
+    }
     m_pending += m_process->readAll();
     // Progress updates are separated by '\r', regular lines by '\n'.
     qsizetype start = 0;
@@ -675,6 +726,10 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 {
     if (!m_process)
         return;
+    if (m_phase == Phase::CleanUp) {
+        onCleanUpFinished(exitCode, status);
+        return;
+    }
     onReadyRead();
     if (!m_pending.isEmpty())
         handleLine(QString::fromLocal8Bit(m_pending));
@@ -717,14 +772,20 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
         } else if (success) {
             ++m_summary.transfersOk;
             emit log(LogLevel::Success, tr("Transfer finished."));
-            if (!m_options.verifiedMove())
+            if (!m_options.verifiedMove()) {
                 removeEmptiedSourceDirs(m_transfers.at(m_index));
+                if (startRemoteCleanUp())
+                    return;
+            }
             runVerify = m_options.canVerify();
         } else if (status == QProcess::NormalExit && exitCode == 24) {
             ++m_summary.transfersWithWarnings;
             emit log(LogLevel::Warning, tr("Transfer finished with warnings (%1).").arg(codeText));
-            if (!m_options.verifiedMove())
+            if (!m_options.verifiedMove()) {
                 removeEmptiedSourceDirs(m_transfers.at(m_index));
+                if (startRemoteCleanUp())
+                    return;
+            }
             runVerify = m_options.canVerify();
         } else {
             ++m_summary.transfersFailed;
@@ -775,6 +836,8 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
             ++m_summary.sourcesRemoved;
             emit log(LogLevel::Success, tr("The sources were removed."));
             removeEmptiedSourceDirs(m_transfers.at(m_index));
+            if (startRemoteCleanUp())
+                return;
         } else {
             ++m_summary.removalFailed;
             emit log(LogLevel::Error, tr("Removing the sources failed (%1).").arg(codeText));
@@ -1015,6 +1078,46 @@ void RsyncJob::removeEmptiedSourceDirs(const Transfer &transfer)
         for (const QString &path : std::as_const(left))
             emit log(LogLevel::Warning, tr("Source directory not empty - left in place: %1").arg(LocalPath::display(path)));
     }
+}
+
+bool RsyncJob::startRemoteCleanUp()
+{
+    if (!m_options.removesSourceDirs() || m_index >= m_transfers.size() || !m_transfers.at(m_index).runsOnServer())
+        return false;
+    m_phase = Phase::CleanUp;
+    startProcess();
+    return true;
+}
+
+void RsyncJob::onCleanUpFinished(int exitCode, QProcess::ExitStatus status)
+{
+    m_cleanUpOutput += m_process->readAll();
+    m_process->deleteLater();
+    m_process = nullptr;
+    const QList<QByteArray> fields = m_cleanUpOutput.split('\0');
+    for (qsizetype i = 0; i + 1 < fields.size(); ++i) {
+        if (fields.at(i) == "removed" && i + 2 < fields.size()) {
+            const QString dir = LocalPath::decode(fields.at(i + 1));
+            const int removed = fields.at(i + 2).trimmed().toInt();
+            m_summary.sourceDirsRemoved += removed;
+            if (removed > 0)
+                emit log(LogLevel::Info, tr("Removed %1 emptied source director(y/ies) in %2").arg(removed).arg(LocalPath::display(dir)));
+            i += 2;
+        } else if (fields.at(i) == "left") {
+            emit log(LogLevel::Warning, tr("Source directory not empty - left in place: %1")
+                                            .arg(LocalPath::display(LocalPath::decode(fields.at(i + 1)))));
+            i += 1;
+        }
+    }
+    if (m_cancelRequested)
+        emit log(LogLevel::Warning, tr("Removing the emptied source directories was cancelled."));
+    else if (status != QProcess::NormalExit || exitCode != 0)
+        emit log(LogLevel::Warning, tr("The emptied source directories on the server could not be removed (exit code %1).")
+                                        .arg(exitCode));
+    m_cleanUpOutput.clear();
+    m_phase = Phase::Copy;
+    ++m_index;
+    startNext();
 }
 
 void RsyncJob::finish()

@@ -998,7 +998,7 @@ void MainWindow::updatePreview()
 
 void MainWindow::updateControls()
 {
-    const bool running = m_job && m_job->isRunning();
+    const bool running = isBusy();
     m_sourceBox->setEnabled(!running);
     m_destinationBox->setEnabled(!running);
     m_optionsBox->setEnabled(!running);
@@ -1220,7 +1220,7 @@ void MainWindow::showAbout()
 
 void MainWindow::startCopy()
 {
-    if (m_job && m_job->isRunning())
+    if (isBusy())
         return;
 
     RsyncOptions options = currentOptions();
@@ -1266,6 +1266,130 @@ void MainWindow::startCopy()
         }
     }
 
+    // All ssh connections of the run to one server share one login (one password question at most).
+    options.sshControlPath = RsyncOptions::defaultSshControlPath();
+    if (checkServers(options, dest, plan))
+        return; // continues in onServersChecked()
+    continueCopy(options, dest, std::move(plan), {});
+}
+
+bool MainWindow::checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan)
+{
+    PendingCopy pending{options, dest, std::move(plan), {}, {}};
+    for (int i = 0; i < pending.plan.transfers.size(); ++i) {
+        const RsyncJob::Transfer &transfer = pending.plan.transfers.at(i);
+        if (!transfer.runsOnServer())
+            continue;
+        auto *probe = new RemoteProbe(options, transfer.host, transfer.port, transfer.sources, transfer.destination, this);
+        connect(probe, &RemoteProbe::finished, this, [this, i, probe](const RemoteProbe::Result &result) {
+            probe->deleteLater();
+            if (!m_pending)
+                return;
+            m_pending->results.insert(i, result);
+            m_pending->probes.removeAll(probe);
+            if (m_pending->probes.isEmpty())
+                onServersChecked();
+        });
+        pending.probes << probe;
+    }
+    if (pending.probes.isEmpty())
+        return false;
+    m_pending = std::move(pending);
+    m_resultLabel->clear();
+    m_currentFile->setText(tr("Checking the server..."));
+    for (const QPointer<RemoteProbe> &probe : std::as_const(m_pending->probes))
+        probe->start();
+    updateControls();
+    return true;
+}
+
+void MainWindow::onServersChecked()
+{
+    PendingCopy pending = std::move(*m_pending);
+    m_pending.reset();
+    m_currentFile->clear();
+    updateControls();
+    RsyncJob::Plan &plan = pending.plan;
+    const RsyncOptions &options = pending.options;
+
+    QStringList infos;
+    QStringList missing;
+    QStringList notWritable;
+    bool createMissing = false;
+    for (auto it = pending.results.cbegin(); it != pending.results.cend(); ++it) {
+        const RsyncJob::Transfer &transfer = plan.transfers.at(it.key());
+        const RemoteProbe::Result &result = it.value();
+        const QString where = transfer.port > 0 ? tr("%1 (port %2)").arg(transfer.host).arg(transfer.port) : transfer.host;
+        if (result.cancelled) {
+            m_resultLabel->setText(tr("Cancelled."));
+            return;
+        }
+        if (const QString error = result.error(); !error.isEmpty()) {
+            QMessageBox::warning(this, tr("Cannot copy on the server"), tr("%1:\n%2").arg(where, error));
+            return;
+        }
+        if (const QString source = result.destinationInsideSource(); !source.isEmpty()) {
+            QMessageBox::warning(this, tr("Cannot continue"),
+                                 tr("The destination %1 is inside the source directory %2 (on %3).")
+                                     .arg(LocalPath::display(transfer.destination), LocalPath::display(source), where));
+            return;
+        }
+        if (result.destination.type == RemoteProbe::Type::File) {
+            QMessageBox::warning(this, tr("Invalid destination"),
+                                 tr("%1 on %2 is not a directory.").arg(LocalPath::display(transfer.destination), where));
+            return;
+        }
+        for (const QString &path : result.missingSources())
+            missing << tr("%1 (on %2)").arg(LocalPath::display(path), where);
+        if (result.destination.type == RemoteProbe::Type::Missing)
+            createMissing = true;
+        if (!result.parentWritable)
+            notWritable << tr("%1 on %2").arg(LocalPath::display(result.existingParent), where);
+        QString info = tr("Server %1: %2").arg(where, result.rsyncVersion);
+        if (result.freeBytes >= 0)
+            info += tr(", %1 free in %2").arg(QLocale().formattedDataSize(result.freeBytes), LocalPath::display(result.existingParent));
+        infos << info;
+    }
+
+    if (!missing.isEmpty()) {
+        const auto answer = QMessageBox::question(
+            this, tr("Some sources do not exist"),
+            tr("These sources do not exist:\n%1\n\nContinue without them?").arg(missing.join(QLatin1Char('\n'))));
+        if (answer != QMessageBox::Yes)
+            return;
+        for (auto it = pending.results.cbegin(); it != pending.results.cend(); ++it) {
+            for (const QString &path : it.value().missingSources())
+                plan.transfers[it.key()].sources.removeAll(path);
+        }
+        plan.transfers.removeIf([](const RsyncJob::Transfer &transfer) { return transfer.sources.isEmpty(); });
+        if (plan.transfers.isEmpty()) {
+            QMessageBox::warning(this, tr("Cannot continue"), tr("None of the sources exists."));
+            return;
+        }
+    }
+    if (createMissing && !options.dryRun) {
+        const auto answer = QMessageBox::question(this, tr("Create destination"),
+                                                  tr("The directory %1 does not exist on the server. Create it?")
+                                                      .arg(LocalPath::display(pending.dest.toString())));
+        if (answer != QMessageBox::Yes)
+            return;
+        for (RsyncJob::Transfer &transfer : plan.transfers) {
+            if (transfer.runsOnServer())
+                transfer.createDestination = true;
+        }
+    }
+    if (!notWritable.isEmpty() && !options.dryRun) {
+        const auto answer = QMessageBox::question(
+            this, tr("Destination not writable"),
+            tr("The ssh user cannot write to:\n%1\n\nContinue anyway?").arg(notWritable.join(QLatin1Char('\n'))));
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+    continueCopy(options, pending.dest, std::move(plan), infos);
+}
+
+void MainWindow::continueCopy(RsyncOptions options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos)
+{
     // FAT keeps file times to 2 s: without a tolerance rsync would copy half of the files again on every run.
     if (options.autoModifyWindow && !dest.isRemote() && (options.archive || options.times))
         options.modifyWindow = RsyncJob::modifyWindowFor(dest.path, !options.dryRun);
@@ -1344,6 +1468,8 @@ void MainWindow::startCopy()
         appendLog(RsyncJob::LogLevel::Info, tr("Log file: %1").arg(RunLog::displayDirectory(m_runLog.path())));
     else if (options.logToFile)
         appendLog(RsyncJob::LogLevel::Warning, tr("The log is not saved: %1").arg(logFileError));
+    for (const QString &info : infos)
+        appendLog(RsyncJob::LogLevel::Info, info);
     if (options.modifyWindow > 0) {
         appendLog(RsyncJob::LogLevel::Info,
                   tr("The destination keeps file times only to 2 seconds (FAT) - added --modify-window=%1, "
@@ -1407,10 +1533,35 @@ void MainWindow::measureSourcesForDesktopProgress(const RsyncOptions &options)
     // measured in the background. With a remote source there is no total (and no graph).
     stopMeasuringSources();
     QStringList paths;
-    for (const Location &loc : sources()) {
-        if (loc.isRemote())
+    const QList<Location> list = sources();
+    const bool remote = !list.isEmpty() && list.first().isRemote();
+    for (const Location &loc : list) {
+        // Local sources are measured here, remote ones of one server there (du over ssh); a mix is not measured.
+        if (loc.isRemote() != remote || loc.originKey() != list.first().originKey())
             return;
         paths << loc.path;
+    }
+    if (remote) {
+        const Location &first = list.first();
+        QStringList ssh = options.sshCommand(first.port);
+        const QString program = ssh.takeFirst();
+        ssh << QStringLiteral("--") << (first.user.isEmpty() ? first.host : first.user + QLatin1Char('@') + first.host)
+            << RemoteProbe::sizeCommand(paths);
+        auto *process = new QProcess(this);
+        process->setStandardInputFile(QProcess::nullDevice());
+        m_remoteMeasure = process;
+        connect(process, &QProcess::finished, this, [this, process] {
+            process->deleteLater();
+            if (m_remoteMeasure != process)
+                return;
+            m_remoteMeasure = nullptr;
+            const qint64 total = RemoteProbe::parseSize(process->readAllStandardOutput());
+            if (total > 0)
+                m_desktopProgress->setTotalBytes(total);
+        });
+        RsyncJob::setRawArguments(process, program, ssh);
+        process->start(program, ssh);
+        return;
     }
     auto cancel = std::make_shared<std::atomic_bool>(false);
     m_measureCancel = cancel;
@@ -1428,13 +1579,33 @@ void MainWindow::measureSourcesForDesktopProgress(const RsyncOptions &options)
 
 void MainWindow::stopMeasuringSources()
 {
+    if (m_remoteMeasure) {
+        QProcess *process = m_remoteMeasure;
+        m_remoteMeasure = nullptr;
+        process->disconnect(this);
+        process->kill();
+        process->waitForFinished(1000);
+        process->deleteLater();
+    }
     if (m_measureCancel)
         m_measureCancel->store(true);
     m_measureCancel.reset();
 }
 
+bool MainWindow::isBusy() const
+{
+    return (m_job && m_job->isRunning()) || m_pending.has_value();
+}
+
 void MainWindow::cancelCopy()
 {
+    if (m_pending) {
+        for (const QPointer<RemoteProbe> &probe : std::as_const(m_pending->probes)) {
+            if (probe)
+                probe->cancel();
+        }
+        return;
+    }
     if (m_job)
         m_job->cancel();
 }

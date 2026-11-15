@@ -36,12 +36,15 @@ public:
         // Non-empty ("[user@]host"): the sources and the destination are on this host and rsync runs there,
         // started over ssh - the data does not go through this computer.
         QString host;
+        // On the server: the destination is created first (mkdir -p), as the window does for local ones.
+        bool createDestination = false;
 
         bool runsOnServer() const { return !host.isEmpty(); }
     };
 
-    // The rsync runs of a transfer: the copy, the verification, the removal of the sources of a verified move.
-    enum class Pass { Copy, Verify, Remove };
+    // The runs of a transfer: the copy, the verification, the removal of the sources of a verified move, and for a
+    // move on the server the removal of the emptied source directories there (not rsync: a sh script over ssh).
+    enum class Pass { Copy, Verify, Remove, CleanUp };
 
     // The process to start for one run of a transfer.
     struct Command
@@ -56,6 +59,9 @@ public:
     // With `reportPid` the remote command first prints "RSYNC-GUI-PID <pid>" (the PID of the remote rsync,
     // which replaces the shell with exec), so that cancelling can stop it (see cancel()).
     static Command command(const Transfer &transfer, const RsyncOptions &options, Pass pass, bool reportPid = false);
+    // QProcess passes arguments as UTF-8: for arguments with bytes that are not valid UTF-8 (see LocalPath) the
+    // child execs `program` itself with the exact bytes.
+    static void setRawArguments(QProcess *process, const QString &program, const QStringList &args);
     // The options of the rsync of a pass (without the sources and the destination).
     static QStringList rsyncArguments(const Transfer &transfer, const RsyncOptions &options, Pass pass);
     // The first line printed by a command with `reportPid`.
@@ -200,7 +206,6 @@ private:
     // Before the verification of a local destination: drops the copies from the page cache (in a thread).
     void startVerify();
     void onCacheDropped(const CacheDropResult &result);
-    static void setRawArguments(QProcess *process, const QString &program, const QStringList &args);
     // Stops the rsync of a transfer that runs on the server: ssh host kill -TERM <pid> (detached).
     void killRemote();
     void onReadyRead();
@@ -208,6 +213,9 @@ private:
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
     void onProcessError(QProcess::ProcessError error);
     void removeEmptiedSourceDirs(const Transfer &transfer);
+    // For a move on the server: starts the CleanUp pass; false if there is nothing to do.
+    bool startRemoteCleanUp();
+    void onCleanUpFinished(int exitCode, QProcess::ExitStatus status);
     void finish();
     void emitProgress(double currentFraction);
 
@@ -235,6 +243,7 @@ private:
     bool m_cancelRequested = false;
     bool m_awaitingPid = false; // a transfer on the server: the first line is the PID of the remote rsync
     qint64 m_remotePid = 0;
+    QByteArray m_cleanUpOutput; // the records of the CleanUp pass
     std::shared_ptr<std::atomic<bool>> m_dropCancel; // set while the page cache is being dropped
     QPointer<QThread> m_dropThread;
 };

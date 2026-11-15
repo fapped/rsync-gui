@@ -281,6 +281,14 @@ QStringList RsyncOptions::remoteShellArguments(int port) const
     if (port < 0)
         return {};
     QString shell = useRemoteShell ? remoteShell.trimmed() : QString();
+    QStringList program;
+    splitArguments(shell, &program);
+    const QStringList sharing = sshSharingArguments(program.isEmpty() ? QStringLiteral("ssh") : program.first());
+    if (!sharing.isEmpty()) {
+        shell = shell.isEmpty() ? QStringLiteral("ssh") : shell;
+        for (const QString &arg : sharing)
+            shell += QLatin1Char(' ') + shellQuote(arg); // rsync splits -e like a shell (quotes)
+    }
     if (port > 0)
         shell = (shell.isEmpty() ? QStringLiteral("ssh") : shell) + QStringLiteral(" -p ") + QString::number(port);
     if (shell.isEmpty())
@@ -295,9 +303,33 @@ QStringList RsyncOptions::sshCommand(int port) const
         splitArguments(remoteShell.trimmed(), &command);
     if (command.isEmpty())
         command << QStringLiteral("ssh");
+    command << sshSharingArguments(command.first());
     if (port > 0)
         command << QStringLiteral("-p") << QString::number(port);
     return command;
+}
+
+QStringList RsyncOptions::sshSharingArguments(const QString &program) const
+{
+    if (sshControlPath.isEmpty() || QFileInfo(program).fileName() != QStringLiteral("ssh"))
+        return {};
+    // auto: the first connection becomes the master, the others use it; it stays 60 s after the last one.
+    return {QStringLiteral("-o"), QStringLiteral("ControlMaster=auto"), QStringLiteral("-o"),
+            QStringLiteral("ControlPersist=60"), QStringLiteral("-o"), QStringLiteral("ControlPath=") + sshControlPath};
+}
+
+QString RsyncOptions::defaultSshControlPath()
+{
+    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (runtime.isEmpty())
+        return {};
+    const QString dir = runtime + QStringLiteral("/rsync-gui");
+    if (!QDir().mkpath(dir) || !QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                                                | QFileDevice::ExeOwner))
+        return {};
+    // %C: a hash of the local host, the remote host, the port and the user - one socket per server and account,
+    // short enough for the limit of socket paths (108 bytes).
+    return dir + QStringLiteral("/ssh-%C");
 }
 
 QStringList RsyncOptions::extraArgumentList() const
