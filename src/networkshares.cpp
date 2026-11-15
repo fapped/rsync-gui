@@ -382,7 +382,10 @@ ShareRouting ShareRouting::route(const QList<Location> &sources, const Location 
         if (mapped)
             result.notes << QObject::tr("The source %1 is reached over ssh: %2")
                                 .arg(LocalPath::display(source.path), LocalPath::display(routed.toString()));
-        if (onNetworkMount(routed) && (result.destination.isRemote() || onNetworkMount(result.destination)))
+        // Read from the network and written back to it through this computer: a network mount on one side and the
+        // network (a mount or ssh) on the other.
+        if ((onNetworkMount(routed) && (result.destination.isRemote() || onNetworkMount(result.destination)))
+            || (routed.isRemote() && onNetworkMount(result.destination)))
             result.throughNetworkTwice = true;
         result.sources << routed;
     }

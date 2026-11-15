@@ -2,6 +2,7 @@
 #include "localpath.h"
 #include "remoteprobe.h"
 #include "rsyncjob.h"
+#include "sshhosts.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -314,7 +315,15 @@ void SharesDialog::editCurrent()
     ShareSettings settings = ShareSettings::load(qsettings, key);
     if (settings.sshTarget.isEmpty() && settings.serverPath.isEmpty()) {
         const ShareSettings detected = ShareSettings::detected(share);
-        settings.sshTarget = detected.sshTarget;
+        // An alias from ~/.ssh/config that leads to the server, if there is one (it carries the user, the port, the key).
+        settings.sshTarget = SshHosts::suggestTarget(m_options.sshCommand(0), share.server, share.user, {},
+                                                     [this](const Location &loc) {
+                                                         return SshHosts::resolve(m_options.sshCommand(0),
+                                                                                  loc.user.isEmpty() ? loc.host : loc.user + QLatin1Char('@') + loc.host,
+                                                                                  loc.port);
+                                                     });
+        if (share.kind == NetworkShare::Kind::Sshfs)
+            settings.sshTarget = detected.sshTarget; // the mount names its login itself
         settings.serverPath = detected.serverPath;
     }
     ShareDialog dialog(share, settings, m_options, this);

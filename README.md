@@ -455,6 +455,10 @@ ssh -- user@nas "rsync -avhP -- '/volume1/Photos 2024' /volume1/Backup/"
   rsync at all - neither on the server nor for copies between the server and this computer. The log then
   says that the server did not run the command. Such a server can be used only through a mounted file system
   (sshfs, Dolphin's KIO), with the data going through this computer.
+- **One server under several names** - an alias from `~/.ssh/config` (`files`), its address with the user
+  (`shareuser@10.0.0.6`), the server of a mounted share: `ssh -G` (which only reads the configuration) tells
+  whether two locations lead to the same host, port and user; if so they count as one server and rsync runs
+  there (the log says which name is used). Another user on the same host is another account - not joined.
 - On by default: *Run rsync on the server when the sources and the destination are on it* in the options
   (`runOnServer`). Turned off, such a copy is refused, as before.
 - The server needs `rsync` in the `PATH` of the ssh user and a POSIX login shell (sh, dash, bash, busybox
@@ -496,11 +500,13 @@ rsync), Rsync GUI can use ssh instead of the mount:
 | on the share | on the share (same server) | rsync **on the server**, with the server's paths |
 | here | on the share | rsync over ssh to the server (only changes are transferred, the file list is built there) |
 | on the share | here | rsync over ssh from the server |
-| a share not set up / another server | anything | through the mount as before; a warning in the log when the data crosses the network twice |
+| a share not set up / another server | anything | through the mount as before; a warning in the log when the data is read from the network and written back to it through this computer (also from a server to a mounted share) |
 
 - The shares are found in `/proc/self/mountinfo`: **sshfs** mounts name the server and the path
   (`user@host:/path`); **CIFS** mounts name the server and the share (`//server/share`) and the `username=`
-  option (used as the ssh user). The path of a Samba share on the server is not in the mount - *Detect*
+  option. The suggested ssh login is the name of the server used by the copy at hand (e.g. its `sftp://`
+  source), else an alias from `~/.ssh/config` that leads to the server (it carries the user, the port and the
+  key), else `username@server`. The path of a Samba share on the server is not in the mount - *Detect*
   asks Samba with `testparm` over ssh, or it is typed in.
 - **Opt-in per share**: nothing changes until a share is set up. The first time a share is used, the window
   offers *Set up…* / *Not now* / *Never for this share*. *File → Network shares…* lists the mounted shares

@@ -975,9 +975,16 @@ void MainWindow::updatePreview()
     const Location dest = destination();
     // As the copy will run: network shares set up for ssh replaced by their locations on the server.
     QSettings store;
-    const ShareRouting routing = ShareRouting::route(
-        sources(), dest.isValid() ? dest : Location::parse(QStringLiteral("/DEST")), Mount::current(),
+    const auto resolver = [this, &options](const Location &location) { return sshIdentity(options, location); };
+    QList<Location> sourceList = sources();
+    Location target = dest.isValid() ? dest : Location::parse(QStringLiteral("/DEST"));
+    if (options.runOnServer)
+        SshHosts::unify(sourceList, target, resolver);
+    ShareRouting routing = ShareRouting::route(
+        sourceList, target, Mount::current(),
         [&store](const QString &key) { return ShareSettings::load(store, key); }, options.runOnServer, options.contentsOnly);
+    if (options.runOnServer)
+        SshHosts::unify(routing.sources, routing.destination, resolver);
     RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
     if (!routing.destinationChmod.isEmpty()) {
         for (RsyncJob::Transfer &transfer : plan.transfers)
@@ -1256,10 +1263,15 @@ void MainWindow::startCopy()
     }
 
     // The local paths are checked as they are (also those on network mounts), before anything is decided about them.
+    // One server under several names (an ssh alias, user@address) is one origin: rsync can run there.
+    m_sshIdentities.clear();
+    const auto resolver = [this, &options](const Location &location) { return sshIdentity(options, location); };
     QList<Location> sourceList = sources();
+    Location target = dest;
+    QStringList sameServer = options.runOnServer ? SshHosts::unify(sourceList, target, resolver) : QStringList();
     QStringList skipped; // missing sources the user chose to leave out (for the log)
     {
-        const RsyncJob::Plan check = RsyncJob::plan(sourceList, dest, options);
+        const RsyncJob::Plan check = RsyncJob::plan(sourceList, target, options);
         if (!check.error.isEmpty()) {
             QMessageBox::warning(this, tr("Cannot continue"), check.error);
             return;
@@ -1291,14 +1303,19 @@ void MainWindow::startCopy()
     const QList<Mount> mounts = Mount::current();
     QSettings store;
     const auto lookup = [&store](const QString &key) { return ShareSettings::load(store, key); };
-    ShareRouting routing = ShareRouting::route(sourceList, dest, mounts, lookup, options.runOnServer, options.contentsOnly);
+    ShareRouting routing = ShareRouting::route(sourceList, target, mounts, lookup, options.runOnServer, options.contentsOnly);
     if (!routing.unsetShares.isEmpty()) {
         bool changed = false;
         for (const NetworkShare &share : std::as_const(routing.unsetShares))
-            changed = offerShareSetup(share, options) || changed;
+            changed = offerShareSetup(share, options, QList<Location>(sourceList) << target) || changed;
         if (changed)
-            routing = ShareRouting::route(sourceList, dest, mounts, lookup, options.runOnServer, options.contentsOnly);
+            routing = ShareRouting::route(sourceList, target, mounts, lookup, options.runOnServer, options.contentsOnly);
     }
+    // A share set up with another name of a server than the one of the other side.
+    if (options.runOnServer)
+        sameServer += SshHosts::unify(routing.sources, routing.destination, resolver);
+    sameServer.removeDuplicates();
+    routing.notes = sameServer + routing.notes;
     RsyncJob::Plan plan = RsyncJob::plan(routing.sources, routing.destination, options);
     if (!plan.error.isEmpty()) {
         QMessageBox::warning(this, tr("Cannot continue"), plan.error);
@@ -1310,9 +1327,9 @@ void MainWindow::startCopy()
             transfer.extraArguments << QStringLiteral("--chmod=") + routing.destinationChmod;
     }
     if (routing.throughNetworkTwice) {
-        plan.notes << tr("Sources on a network share are copied to a network destination through this computer - the "
-                         "data crosses the network twice. A share set up for ssh (File > Network shares) is copied "
-                         "on its server instead.");
+        plan.notes << tr("The data goes through this computer: it is read from the network and written back to it. "
+                         "A network share set up for ssh (File > Network shares) is copied on its server instead, "
+                         "when the other side is on the same server.");
     }
     m_runSources = routing.sources;
     m_runDestination = routing.destination;
@@ -1324,7 +1341,19 @@ void MainWindow::startCopy()
     continueCopy(options, dest, std::move(plan), routing.notes);
 }
 
-bool MainWindow::offerShareSetup(const NetworkShare &share, const RsyncOptions &options)
+SshIdentity MainWindow::sshIdentity(const RsyncOptions &options, const Location &location)
+{
+    const QStringList ssh = options.sshCommand(0);
+    const QString key = ssh.join(QLatin1Char('\x1f')) + QLatin1Char('\x1e') + location.originKey();
+    auto it = m_sshIdentities.constFind(key);
+    if (it == m_sshIdentities.cend()) {
+        const QString target = location.user.isEmpty() ? location.host : location.user + QLatin1Char('@') + location.host;
+        it = m_sshIdentities.insert(key, SshHosts::resolve(ssh, target, location.port));
+    }
+    return *it;
+}
+
+bool MainWindow::offerShareSetup(const NetworkShare &share, const RsyncOptions &options, const QList<Location> &others)
 {
     QMessageBox box(QMessageBox::Question, tr("Network share"),
                     tr("%1 is the network share %2.\n\nCopying over ssh instead of through the mount is faster: rsync "
@@ -1347,7 +1376,10 @@ bool MainWindow::offerShareSetup(const NetworkShare &share, const RsyncOptions &
     }
     if (box.clickedButton() != setUp)
         return false;
-    ShareDialog dialog(share, ShareSettings::detected(share), options, this);
+    ShareSettings suggested = ShareSettings::detected(share);
+    suggested.sshTarget = SshHosts::suggestTarget(options.sshCommand(0), share.server, share.user, others,
+                                                  [this, &options](const Location &loc) { return sshIdentity(options, loc); });
+    ShareDialog dialog(share, suggested, options, this);
     if (dialog.exec() != QDialog::Accepted)
         return false;
     const ShareSettings settings = dialog.settings();

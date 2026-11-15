@@ -20,6 +20,7 @@ add_library(rsynccore STATIC
     src/rsyncjob.h src/rsyncjob.cpp
     src/remoteprobe.h src/remoteprobe.cpp
     src/networkshares.h src/networkshares.cpp
+    src/sshhosts.h src/sshhosts.cpp
     src/speedhistory.h src/speedhistory.cpp
     src/filelisting.h src/filelisting.cpp
     src/runlog.h src/runlog.cpp

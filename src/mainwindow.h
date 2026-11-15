@@ -3,6 +3,7 @@
 #include "desktopprogress.h"
 #include "location.h"
 #include "networkshares.h"
+#include "sshhosts.h"
 #include "remoteprobe.h"
 #include "rsyncjob.h"
 #include "runlog.h"
@@ -99,7 +100,9 @@ private:
     // with continueCopy(). Returns false if there is nothing to check.
     bool checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan, const QStringList &infos);
     // Offers to set up a network share that is used here but not set up yet; true if it is now set up for ssh.
-    bool offerShareSetup(const NetworkShare &share, const RsyncOptions &options);
+    bool offerShareSetup(const NetworkShare &share, const RsyncOptions &options, const QList<Location> &others);
+    // ssh -G for a remote location (cached: the configuration rarely changes; cleared at the start of a copy).
+    SshIdentity sshIdentity(const RsyncOptions &options, const Location &location);
     void showNetworkShares();
     void onServersChecked();
     // The rest of startCopy() after the checks: FAT, the confirmation of deleting options, the start.
@@ -203,6 +206,7 @@ private:
     std::optional<PendingCopy> m_pending;
     // The sources and the destination of the run as rsync gets them (network shares set up for ssh replaced by
     // their locations on the server, see ShareRouting).
+    QHash<QString, SshIdentity> m_sshIdentities;
     QList<Location> m_runSources;
     Location m_runDestination;
     QAction *m_sharesAction = nullptr;

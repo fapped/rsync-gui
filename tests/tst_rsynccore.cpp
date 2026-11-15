@@ -7,6 +7,7 @@
 #include "rsyncoptions.h"
 #include "runlog.h"
 #include "speedhistory.h"
+#include "sshhosts.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -278,6 +279,8 @@ private slots:
     void shareSettings();
     void shareRouting();
     void sambaChmod();
+    void sshHostsUnify();
+    void sshHostsConfig();
     void parseProgress_data();
     void parseProgress();
     void parseSizeAndRate_data();
@@ -351,6 +354,7 @@ private slots:
     void remoteSshfsShare();
     void remoteSambaDetect();
     void remoteFromSftpOnly();
+    void remoteSameServerOtherName();
     void remoteAskpassHostKeyAndPassword();
 };
 
@@ -1242,6 +1246,87 @@ void TestRsyncCore::sambaChmod()
     QCOMPARE(st.st_mode & 07777, mode_t(0644)); // 0777 & 0640 | 0004
     QCOMPARE(::stat(QFile::encodeName(tmp.filePath("dest/d")).constData(), &st), 0);
     QCOMPARE(st.st_mode & 07777, mode_t(0750));
+}
+
+void TestRsyncCore::sshHostsUnify()
+{
+    // An alias and user@address of one server and account: one origin, so rsync runs there.
+    const auto resolver = [](const Location &loc) {
+        if (loc.host == "nas-files" || (loc.host == "10.0.0.6" && loc.user == "shareuser"))
+            return SshIdentity{"shareuser", "10.0.0.6", 22};
+        if (loc.host == "10.0.0.6")
+            return SshIdentity{"other", "10.0.0.6", 22};
+        return SshIdentity{};
+    };
+    QList<Location> sources{Location::parse("sftp://nas-files/srv/a"), Location::parse("/local")};
+    Location dest = Location::parse("shareuser@10.0.0.6:/volume1/b");
+    const QStringList notes = SshHosts::unify(sources, dest, resolver);
+    QCOMPARE(dest.toString(), QStringLiteral("nas-files:/volume1/b"));
+    QCOMPARE(sources.at(1), Location::parse("/local"));
+    QCOMPARE(notes.size(), 1);
+    QVERIFY2(notes.first().contains("nas-files"), qPrintable(notes.first()));
+    const RsyncJob::Plan plan = RsyncJob::plan({sources.first()}, dest, RsyncOptions());
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    QVERIFY(plan.transfers.first().runsOnServer());
+    // Another account on the same address is another origin; unknown hosts are left as they are.
+    sources = {Location::parse("sftp://nas-files/srv/a")};
+    dest = Location::parse("10.0.0.6:/b");
+    QVERIFY(SshHosts::unify(sources, dest, resolver).isEmpty());
+    QCOMPARE(dest.host, QStringLiteral("10.0.0.6"));
+    sources = {Location::parse("x:/a")};
+    dest = Location::parse("y:/b");
+    QVERIFY(SshHosts::unify(sources, dest, resolver).isEmpty());
+
+    // The suggested login for a share: a location of the copy on that server first.
+    QCOMPARE(SshHosts::suggestTarget({"ssh", "-F", "/dev/null"}, "10.0.0.6", "shareuser",
+                                     {Location::parse("/x"), Location::parse("nas-files:/a")}, resolver),
+             QStringLiteral("nas-files"));
+    QCOMPARE(SshHosts::suggestTarget({"ssh", "-F", "/dev/null"}, "10.0.0.7", "anna", {}, resolver),
+             QStringLiteral("anna@10.0.0.7"));
+}
+
+void TestRsyncCore::sshHostsConfig()
+{
+    if (QStandardPaths::findExecutable("ssh").isEmpty())
+        QSKIP("ssh is not installed");
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString config = tmp.filePath("config");
+    writeFile(config, "Host files nas-files\n    HostName 10.0.0.6\n    User shareuser\n"
+                      "Host *.lan !secret wild?\n    User nobody\n"
+                      "Host=other\n    HostName 10.0.0.9\n    Port 2222\n");
+    const QStringList ssh{"ssh", "-F", config};
+    QCOMPARE(SshHosts::configFile(ssh), config);
+    QCOMPARE(SshHosts::configFile({"ssh"}), QDir::homePath() + "/.ssh/config");
+    QCOMPARE(SshHosts::configAliases(config), (QStringList{"files", "nas-files", "other"}));
+    const SshIdentity alias = SshHosts::resolve(ssh, "nas-files", 0);
+    QCOMPARE(alias.user, QStringLiteral("shareuser"));
+    QCOMPARE(alias.hostname, QStringLiteral("10.0.0.6"));
+    QCOMPARE(alias.port, 22);
+    QVERIFY(alias == SshHosts::resolve(ssh, "shareuser@10.0.0.6", 0));
+    QVERIFY(!(alias == SshHosts::resolve(ssh, "root@10.0.0.6", 0)));
+    QCOMPARE(SshHosts::resolve(ssh, "other", 0).port, 2222);
+    QCOMPARE(SshHosts::resolve(ssh, "other", 2200).port, 2200); // -p wins
+    QVERIFY(!SshHosts::resolve({"plink"}, "other", 0).isValid());
+    QCOMPARE(SshHosts::aliasFor(ssh, "10.0.0.6", "shareuser"), QStringLiteral("files"));
+    QCOMPARE(SshHosts::aliasFor(ssh, "10.0.0.6", "root"), QString());
+    QCOMPARE(SshHosts::aliasFor(ssh, "10.0.0.9", QString()), QStringLiteral("other"));
+    // The CIFS user differs from the ssh one: an alias of the server is still better than user@address.
+    const auto resolver = [&ssh](const Location &loc) {
+        return SshHosts::resolve(ssh, loc.user.isEmpty() ? loc.host : loc.user + "@" + loc.host, loc.port);
+    };
+    QCOMPARE(SshHosts::suggestTarget(ssh, "10.0.0.6", "smbuser", {}, resolver), QStringLiteral("files"));
+    QCOMPARE(SshHosts::suggestTarget(ssh, "10.0.0.8", "smbuser", {}, resolver), QStringLiteral("smbuser@10.0.0.8"));
+
+    // A source on a server copied to a network mount here: through this computer, both ways over the network.
+    const QString share = tmp.filePath("share");
+    QVERIFY(QDir().mkpath(share));
+    const QList<Mount> mounts = Mount::parse(QStringLiteral("1 0 8:1 / / rw - ext4 /dev/sda1 rw\n"
+                                                            "2 1 0:2 / %1 rw - cifs //10.0.0.6/Video rw\n").arg(share).toUtf8());
+    const ShareRouting r = ShareRouting::route({Location::parse("nas-files:/a")}, Location::parse(share), mounts,
+                                               [](const QString &) { return ShareSettings{ShareSettings::Use::Never, {}, 0, {}, {}}; },
+                                               true);
+    QVERIFY(r.throughNetworkTwice);
 }
 
 void TestRsyncCore::parseProgress_data()
@@ -3082,6 +3167,49 @@ void TestRsyncCore::remoteFromSftpOnly()
     const QString text = log.join('\n');
     QVERIFY2(text.contains("is your shell clean?"), qPrintable(text));
     QVERIFY2(text.contains("rsync could not be started on the server"), qPrintable(text));
+}
+
+void TestRsyncCore::remoteSameServerOtherName()
+{
+    // The source by an alias from an ssh configuration, the destination as user@address: one server, rsync runs there.
+    RemoteServer server(QStringLiteral("othername"));
+    if (!server.isValid())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    QStringList shell;
+    splitArguments(server.shell, &shell);
+    QString key, knownHosts;
+    for (qsizetype i = 0; i + 1 < shell.size(); ++i) {
+        if (shell.at(i) == "-i")
+            key = shell.at(i + 1);
+        if (shell.at(i + 1).startsWith("UserKnownHostsFile="))
+            knownHosts = shell.at(i + 1).mid(19);
+    }
+    QVERIFY(!key.isEmpty() && !knownHosts.isEmpty());
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString config = tmp.filePath("config");
+    writeFile(config, QStringLiteral("Host testbox\n    HostName %1\n    Port %2\n    User %3\n    IdentityFile %4\n"
+                                     "    IdentitiesOnly yes\n    BatchMode yes\n    UserKnownHostsFile %5\n"
+                                     "    StrictHostKeyChecking accept-new\n")
+                          .arg(server.home.host).arg(server.home.port).arg(server.home.user, key, knownHosts).toUtf8());
+    server.run(QStringLiteral("mkdir -p '%1/src' && printf x > '%1/src/x'").arg(server.dir));
+    RsyncOptions options = testOptions();
+    options.useRemoteShell = true;
+    options.remoteShell = "ssh -F " + config;
+    QList<Location> sources{Location::parse("testbox:" + server.dir + "/src")};
+    Location dest = server.at("dest"); // tester@127.0.0.1, port
+    const auto resolver = [&options](const Location &loc) {
+        return SshHosts::resolve(options.sshCommand(0), loc.user.isEmpty() ? loc.host : loc.user + "@" + loc.host, loc.port);
+    };
+    QCOMPARE(SshHosts::unify(sources, dest, resolver).size(), 1);
+    QCOMPARE(dest.host, QStringLiteral("testbox"));
+    const RsyncJob::Plan plan = RsyncJob::plan(sources, dest, options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    QVERIFY(plan.transfers.first().runsOnServer());
+    RsyncJob job(plan.transfers, options);
+    QVERIFY(runJob(job));
+    QVERIFY(job.summary().ok());
+    QCOMPARE(server.run(QStringLiteral("cat '%1/dest/src/x'").arg(server.dir)), QByteArray("x"));
 }
 
 void TestRsyncCore::remoteAskpassHostKeyAndPassword()
