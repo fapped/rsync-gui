@@ -55,6 +55,9 @@ Result: two `sftp://` locations of one server (Dolphin) work, and the data stays
 Before the job starts, one ssh call per host runs a small `sh` script (no bash, no GNU-only options - busybox
 must do) and prints machine-readable lines:
 
+- the account runs commands at all: accounts for sftp only (`ForceCommand internal-sftp`, "This service allows
+  sftp connections only.") cannot run rsync - such a host is used through the mount only (steps 3-5 fall back
+  to the mount for it, with a note instead of an error); since step 1 the failed run already says so;
 - the login shell is POSIX (`set -o` / `$((1+1))` works), `rsync --version` (missing rsync = clear error);
 - for every source: exists, is a directory, `realpath` (for "destination inside a source");
 - the destination: exists / is a directory / its nearest existing parent, writable; `df -Pk` free space;

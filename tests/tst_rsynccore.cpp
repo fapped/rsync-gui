@@ -303,6 +303,7 @@ private slots:
     void remoteCancel();
     void remoteOnServerCopy();
     void remoteOnServerCancel();
+    void remoteOnServerSftpOnly();
     void remoteAskpassHostKeyAndPassword();
 };
 
@@ -2366,6 +2367,34 @@ void TestRsyncCore::remoteOnServerCancel()
     QVERIFY2(timer.elapsed() < 4500, qPrintable(QString::number(timer.elapsed())));
     QVERIFY(job.summary().cancelled);
     QCOMPARE(server.run(QStringLiteral("pgrep -x rsync || true")).trimmed(), QByteArray());
+}
+
+void TestRsyncCore::remoteOnServerSftpOnly()
+{
+    // An account that allows sftp only runs no commands: the failure says so, not "syntax or usage error".
+    const Location home = Location::parse(qEnvironmentVariable("RSYNC_GUI_TEST_SSH_SFTP_ONLY"));
+    const QString shell = qEnvironmentVariable("RSYNC_GUI_TEST_SSH_SHELL");
+    if (!home.isRemote() || shell.isEmpty())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    RsyncOptions options = testOptions();
+    options.useRemoteShell = true;
+    options.remoteShell = shell;
+    Location source = home;
+    source.path += QStringLiteral("/src");
+    Location dest = home;
+    dest.path += QStringLiteral("/dest");
+    const RsyncJob::Plan plan = RsyncJob::plan({source}, dest, options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    QVERIFY(plan.transfers.first().runsOnServer());
+    RsyncJob job(plan.transfers, options);
+    QStringList log;
+    connect(&job, &RsyncJob::log, this, [&log](RsyncJob::LogLevel, const QString &text) { log << text; });
+    QVERIFY(runJob(job));
+    QCOMPARE(job.summary().transfersFailed, 1);
+    const QString text = log.join('\n');
+    QVERIFY2(text.contains("This service allows sftp connections only."), qPrintable(text));
+    QVERIFY2(text.contains("the server did not run the command"), qPrintable(text));
+    QVERIFY2(!text.contains("syntax or usage error"), qPrintable(text));
 }
 
 void TestRsyncCore::remoteAskpassHostKeyAndPassword()

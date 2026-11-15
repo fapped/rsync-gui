@@ -427,6 +427,11 @@ host** over ssh and copies between its own paths:
 ssh -- user@nas "rsync -avhP -- '/volume1/Photos 2024' /volume1/Backup/"
 ```
 
+- The ssh account must be allowed to **run commands**. Accounts for sftp only (e.g. `ForceCommand
+  internal-sftp`, common on NAS devices; ssh prints *This service allows sftp connections only.*) cannot run
+  rsync at all - neither on the server nor for copies between the server and this computer. The log then
+  says that the server did not run the command. Such a server can be used only through a mounted file system
+  (sshfs, Dolphin's KIO), with the data going through this computer.
 - On by default: *Run rsync on the server when the sources and the destination are on it* in the options
   (`runOnServer`). Turned off, such a copy is refused, as before.
 - The server needs `rsync` in the `PATH` of the ssh user and a POSIX login shell (sh, dash, bash, busybox

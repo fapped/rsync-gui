@@ -79,6 +79,14 @@
   - [ ] Files are created by the ssh user, not by Samba: warn when the share uses `force user` / `force group`,
         or a different user; optionally `--chmod` from `create mask` / `directory mask`; the ssh user needs a shell
   - [ ] Tests: `tools/ssh-test` container extended with Samba (mounting CIFS needs root - checked by hand)
+  - [ ] Tests with real sftp servers (by hand, with the user):
+    - [ ] an account for sftp only (`ForceCommand internal-sftp`): the clear "did not run the command" error
+          (checked once on 2026-11-15), and from step 2 on: detected by the probe before anything starts
+    - [ ] an account restricted to rsync with `rrsync` and a key of its own (`command=` in authorized_keys):
+          copies between the server and this computer work, copying on the server is refused with a clear message
+    - [ ] a separate key for rsync in *Remote shell* (`ssh -i ...`) while Dolphin uses another one for sftp
+    - [ ] `sftp://` locations with `~` (Dolphin's home-relative paths), a port and a user, on the server side
+    - [ ] cancelling on a real server (the remote rsync is gone afterwards), with a password login (ksshaskpass)
 - [ ] Very low priority: start the copy right after choosing the destination from Dolphin (`--start`).
       To consider instead: copy & paste - *Copy* in Dolphin (the URLs in the clipboard), then a service menu
       entry on the destination directory, e.g. *Rsync → Paste here*, that takes the sources from the clipboard

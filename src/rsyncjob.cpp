@@ -685,9 +685,19 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     emit statusChanged(QString());
 
     const bool success = status == QProcess::NormalExit && exitCode == 0;
-    const QString codeText = status == QProcess::CrashExit
+    QString codeText = status == QProcess::CrashExit
         ? tr("rsync crashed")
         : tr("exit code %1: %2").arg(exitCode).arg(exitCodeDescription(exitCode));
+    // On the server the command prints the PID line first. Without it the login shell did not run the command
+    // at all, so the exit code is not rsync's: e.g. an account for sftp only ("This service allows sftp
+    // connections only.", exit code 1) or a shell that is not POSIX. (255: ssh's own error, described already.)
+    if (m_awaitingPid && !success && !m_cancelRequested && status == QProcess::NormalExit && exitCode != 255
+        && m_index < m_transfers.size() && m_transfers.at(m_index).runsOnServer()) {
+        codeText = tr("exit code %1: the server did not run the command - rsync cannot run there. The ssh account "
+                      "may allow sftp only, or its login shell is not a POSIX shell (sh, bash)")
+                       .arg(exitCode);
+    }
+    m_awaitingPid = false;
 
     if (m_phase == Phase::Copy) {
         m_bytesBefore += m_processedBytes;

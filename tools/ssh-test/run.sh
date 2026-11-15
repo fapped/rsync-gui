@@ -24,9 +24,11 @@ trap cleanup EXIT
 docker build -q -t "$image" "$repo/tools/ssh-test" > /dev/null
 ssh-keygen -q -t ed25519 -N '' -C rsync-gui-ssh-test -f "$work/key"
 docker run -d --rm --name "$name" -p "127.0.0.1:$port:22" "$image" > /dev/null
-docker exec -i "$name" sh -c 'mkdir -p /home/tester/.ssh && cat > /home/tester/.ssh/authorized_keys &&
-    chown -R tester:tester /home/tester/.ssh && chmod 700 /home/tester/.ssh && chmod 600 /home/tester/.ssh/authorized_keys' \
-    < "$work/key.pub"
+for user in tester sftponly; do
+    docker exec -i "$name" sh -c "mkdir -p /home/$user/.ssh && cat > /home/$user/.ssh/authorized_keys &&
+        chown -R $user:$user /home/$user/.ssh && chmod 700 /home/$user/.ssh && chmod 600 /home/$user/.ssh/authorized_keys" \
+        < "$work/key.pub"
+done
 for _ in $(seq 50); do
     ssh-keyscan -p "$port" 127.0.0.1 > /dev/null 2>&1 && break
     sleep 0.2
@@ -35,6 +37,8 @@ done
 export RSYNC_GUI_TEST_SSH="sftp://tester@127.0.0.1:$port/home/tester"
 export RSYNC_GUI_TEST_SSH_SHELL="ssh -F /dev/null -i $work/key -o IdentitiesOnly=yes -o BatchMode=yes \
 -o UserKnownHostsFile=$work/known_hosts -o StrictHostKeyChecking=accept-new"
+# An account for sftp only (ForceCommand internal-sftp): it runs no commands.
+export RSYNC_GUI_TEST_SSH_SFTP_ONLY="sftp://sftponly@127.0.0.1:$port/home/sftponly"
 # The password of the test user (see the Dockerfile), for the test of password logins through SSH_ASKPASS.
 export RSYNC_GUI_TEST_SSH_PASSWORD=tester-password
 
