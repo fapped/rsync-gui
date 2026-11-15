@@ -29,6 +29,8 @@ be passed as additional arguments.
   when the transfer finishes** successfully,
 - **progress outside the window** (KDE Plasma): on the task manager entry and as a job in the
   notification area (with speed, ETA, a cancel button and "Open destination" afterwards),
+- **resizable sections**: the handle between the sources and the destination with the options/log
+  tabs can be dragged; the sizes are remembered with the window size,
 - options are remembered between runs, export/import to/from JSON files, **presets** and
   integration with the **Dolphin** context menu (*Rsync* submenu).
 

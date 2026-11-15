@@ -38,6 +38,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStorageInfo>
@@ -56,6 +57,8 @@ namespace {
 constexpr int kLocationRole = Qt::UserRole;
 constexpr int kMaxRecentDestinations = 15;
 constexpr int kMaxRecentSettings = 10;
+// The height of the source list on the first start (before the user drags the splitter handle).
+constexpr int kDefaultSourceListHeight = 150;
 const QString kRecentSettingsKey = QStringLiteral("paths/recentSettings");
 
 QString settingsFileFilter()
@@ -91,6 +94,15 @@ void MainWindow::buildUi()
 {
     auto *central = new QWidget(this);
     auto *mainLayout = new QVBoxLayout(central);
+    // The sources and the options/log tabs in a splitter: the user can drag the handle between them to give
+    // one more room at the cost of the other. The destination row stays with the tabs at its own height. No
+    // part can be collapsed (a hidden section would look like a missing one).
+    m_splitter = new QSplitter(Qt::Vertical, central);
+    m_splitter->setChildrenCollapsible(false);
+    mainLayout->addWidget(m_splitter, 1);
+    auto *lowerPane = new QWidget(m_splitter);
+    auto *lowerLayout = new QVBoxLayout(lowerPane);
+    lowerLayout->setContentsMargins(0, 0, 0, 0);
 
     // --- Sources ---
     m_sourceBox = new QGroupBox(tr("Sources"), central);
@@ -99,7 +111,6 @@ void MainWindow::buildUi()
     m_sourceList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_sourceList->setAcceptDrops(false); // drops are handled by the window (URL to path conversion)
     m_sourceList->setMinimumHeight(70);
-    m_sourceList->setMaximumHeight(150); // the options need the space more; the list scrolls
     m_sourceList->setContextMenuPolicy(Qt::ActionsContextMenu);
     sourceLayout->addWidget(m_sourceList, 1);
 
@@ -160,7 +171,8 @@ void MainWindow::buildUi()
     m_sourceInfo = new QLabel(m_sourceBox);
     m_sourceInfo->setWordWrap(true);
     sourceLayout->addWidget(m_sourceInfo);
-    mainLayout->addWidget(m_sourceBox);
+    m_splitter->addWidget(m_sourceBox);
+    m_splitter->addWidget(lowerPane);
 
     // --- Destination ---
     m_destinationBox = new QGroupBox(tr("Destination directory"), central);
@@ -182,7 +194,7 @@ void MainWindow::buildUi()
     m_destinationInfo = new QLabel(m_destinationBox);
     m_destinationInfo->setWordWrap(true);
     destLayout->addWidget(m_destinationInfo);
-    mainLayout->addWidget(m_destinationBox);
+    lowerLayout->addWidget(m_destinationBox);
 
     // --- Options ---
     m_optionsBox = new QGroupBox(optionsBoxTitle());
@@ -355,7 +367,10 @@ void MainWindow::buildUi()
     optionsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_tabs = new QTabWidget(central);
     m_tabs->addTab(optionsScroll, QIcon::fromTheme(QStringLiteral("configure")), tr("Options"));
-    mainLayout->addWidget(m_tabs, 3);
+    lowerLayout->addWidget(m_tabs, 1);
+    // Extra room (a larger window) goes mostly to the tabs, as before.
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 3);
 
     // --- Command preview ---
     auto *previewRow = new QHBoxLayout;
@@ -613,6 +628,13 @@ void MainWindow::loadSettings()
     m_destinationCombo->setEditText(QString());
     m_closeWhenFinishedCheck->setChecked(settings.value(QStringLiteral("window/closeWhenFinished"), false).toBool());
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
+    if (!m_splitter->restoreState(settings.value(QStringLiteral("window/splitter")).toByteArray())) {
+        // The first start: a short list (it scrolls), the options need the room more. The user can drag the
+        // handle; the list then takes all the room given to the section.
+        const int listExcess = qMax(0, m_sourceList->sizeHint().height() - kDefaultSourceListHeight);
+        const int sourceHeight = m_sourceBox->sizeHint().height() - listExcess;
+        m_splitter->setSizes({sourceHeight, qMax(1, height() - sourceHeight)});
+    }
 }
 
 void MainWindow::saveSettings() const
@@ -621,6 +643,7 @@ void MainWindow::saveSettings() const
     if (m_rememberOptions)
         currentOptions().save(settings);
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
+    settings.setValue(QStringLiteral("window/splitter"), m_splitter->saveState());
 }
 
 void MainWindow::rememberDestination(const QString &destination)

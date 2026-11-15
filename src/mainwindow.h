@@ -17,6 +17,7 @@ class QAction;
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class QSplitter;
 class ElidedLabel;
 class QLabel;
 class QLineEdit;
@@ -111,6 +112,7 @@ private:
     QPushButton *m_removeSourcesButton = nullptr;
     QPushButton *m_clearSourcesButton = nullptr;
     QGroupBox *m_sourceBox = nullptr;
+    QSplitter *m_splitter = nullptr; // sources | destination + options/log tabs, the user drags the handle
 
     QGroupBox *m_destinationBox = nullptr;
     QComboBox *m_destinationCombo = nullptr;
