@@ -78,6 +78,32 @@ if(RSYNC_GUI_INSTALL_SERVICEMENUS)
     )
 endif()
 
+# Debian package: tools/make-deb.sh (cpack -G DEB in a Release build on a file system with Unix permissions,
+# see README, "Debian package"). The package installs to /usr; the .desktop files then point to /usr/bin/rsync-gui. The library dependencies (Qt) are
+# found by dpkg-shlibdeps.
+set(CPACK_GENERATOR DEB)
+set(CPACK_PACKAGE_NAME rsync-gui)
+set(CPACK_PACKAGE_VENDOR fapped)
+set(CPACK_PACKAGE_CONTACT "fapped <5470801+fapped@users.noreply.github.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Qt GUI for rsync: copy, verify and move files, with a Dolphin context menu")
+string(CONCAT CPACK_DEBIAN_PACKAGE_DESCRIPTION
+    "A graphical front end for rsync: sources and a destination (local, sftp:// or host:path),\n"
+    "the common options, verification after copying, moves, progress with a speed graph,\n"
+    "Plasma task manager and notification progress, presets and a Dolphin context menu.\n"
+    "Copies within one server and to network shares set up for it run over ssh.")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/fapped/rsync-gui")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
+set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION utils)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rsync, openssh-client")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "ksshaskpass, qt6-wayland")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "dolphin, sshfs, samba-common-bin")
+include(CPack)
+
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     qt_add_executable(tst_rsynccore tests/tst_rsynccore.cpp)

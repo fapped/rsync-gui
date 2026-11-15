@@ -68,7 +68,10 @@
 - [ ] Application icon (currently the `folder-sync` theme icon)
 - [ ] Translations (`tr()` is used in the code, there are no `.ts` files yet)
 - [ ] Nautilus / Nemo integration (scripts or an extension)
-- [ ] `.deb` package / AppImage, CI (Gitea Actions: build + tests)
+- [x] `.deb` package: `tools/make-deb.sh` (CPack, dependencies from dpkg-shlibdeps), checked with apt in a
+      clean Ubuntu 26.04 container (2026-11-15)
+- [ ] AppImage (own Qt: no Plasma theme plugin, the Dolphin menu needs an install option), CI (Gitea Actions:
+      build + tests + the .deb; needs a runner)
 - [ ] Run rsync on the server / use ssh for network shares (docs/plan-server-side.md, steps 1-6 done 2026-11-15):
   - [ ] Checked by hand with the user's NAS: a CIFS share set up with *Detect* (testparm), a copy within a share
         on the server, local -> share over ssh, the ownership note (`force user` / masks)
