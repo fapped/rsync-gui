@@ -577,6 +577,7 @@ void RsyncJob::startProcess()
     m_lastTransferred = 0;
     m_humanLevel = humanLevel(rsyncArguments(transfer, m_options, m_phase));
     m_awaitingPid = transfer.runsOnServer() && m_phase != Phase::CleanUp;
+    m_shellNotClean = false;
     m_cleanUpOutput.clear();
     m_remotePid = 0;
     m_completedBytes = 0;
@@ -642,6 +643,8 @@ void RsyncJob::handleLine(const QString &rawLine)
     const QString line = rawLine.trimmed();
     if (line.isEmpty())
         return;
+    if (line.contains(QLatin1String("is your shell clean?")))
+        m_shellNotClean = true;
     if (m_awaitingPid && line.startsWith(QLatin1String(PidLinePrefix))) {
         m_awaitingPid = false;
         m_remotePid = line.mid(qstrlen(PidLinePrefix)).toLongLong();
@@ -753,6 +756,13 @@ void RsyncJob::onProcessFinished(int exitCode, QProcess::ExitStatus status)
                        .arg(exitCode);
     }
     m_awaitingPid = false;
+    // rsync started over ssh got something else than rsync on the other side: an account that allows sftp only
+    // (ForceCommand internal-sftp answers instead of rsync) or a login shell that prints text.
+    if (m_shellNotClean && !success && !m_cancelRequested) {
+        codeText = tr("exit code %1: rsync could not be started on the server - the ssh account may allow sftp only, "
+                      "or its shell prints text at login (see \"is your shell clean\" in man rsync)")
+                       .arg(exitCode);
+    }
 
     if (m_phase == Phase::Copy) {
         m_bytesBefore += m_processedBytes;

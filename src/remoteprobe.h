@@ -10,6 +10,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <optional>
+
 // Checks done on a server over ssh before a transfer runs there (rsync on the server, see RsyncJob::Transfer::host):
 // one ssh call runs a small POSIX sh script (busybox is enough) that reports whether the account runs commands at
 // all, whether rsync is installed, the type and the real path of every source and of the destination, the nearest
@@ -35,6 +37,7 @@ public:
         QString rsyncVersion;      // the first line of "rsync --version"
         QList<PathInfo> sources;
         PathInfo destination;
+        bool destinationChecked = false; // false when no destination was given (a copy from the server)
         QString existingParent;    // the destination or its nearest existing parent directory
         QString existingParentReal; // its real path
         bool parentWritable = false;
@@ -51,7 +54,22 @@ public:
         QString destinationInsideSource() const;
     };
 
+    // What to check for a transfer: rsync on the server (sources and destination there), a copy from the server
+    // (its sources), or to it (its destination). None for a local transfer.
+    struct Target
+    {
+        enum class Kind { OnServer, From, To };
+        Kind kind = Kind::OnServer;
+        QString host; // [user@]host
+        int port = 0;
+        QStringList sources;     // paths on the host
+        QStringList sourceSpecs; // the entries of Transfer::sources they come from (same order)
+        QString destination;     // a path on the host, empty for a copy from the server
+    };
+    static std::optional<Target> targetFor(const RsyncJob::Transfer &transfer);
+
     // The remote command (one argument for ssh): sh -c '<script>' rsync-gui-probe <destination> <sources...>
+    // (an empty destination: only the sources are checked)
     static QString remoteCommand(const QStringList &sources, const QString &destination);
     // Parses the standard output of the script.
     static Result parse(const QByteArray &output, const QStringList &sources, const QString &destination);

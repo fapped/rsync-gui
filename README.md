@@ -466,7 +466,10 @@ ssh -- user@nas "rsync -avhP -- '/volume1/Photos 2024' /volume1/Backup/"
   notices only when it next writes). The remote command reports the PID of its rsync first
   (`echo RSYNC-GUI-PID $$; exec rsync ...`), and *Cancel* stops it with `ssh host kill -TERM <pid>`; the local
   ssh is terminated after 5 s if it is still running.
-- **Checks before the start**: one ssh call runs a small POSIX `sh` script on the server (busybox is enough):
+- **Checks before the start** (for rsync on the server, and also for copies to or from a server, where only the
+  account, rsync and the sources or the destination are checked - so an sftp-only account is reported before
+  rsync fails with *protocol version mismatch -- is your shell clean?*, which the log explains too):
+  one ssh call runs a small POSIX `sh` script on the server (busybox is enough):
   whether the account runs commands (an sftp-only account is reported before anything starts), whether rsync is
   installed, which sources exist (missing ones can be left out, as local ones), whether the destination exists
   (it is created with `mkdir -p` after asking), is writable and how much space is free, and whether it is

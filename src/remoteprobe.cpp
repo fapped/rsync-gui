@@ -19,18 +19,20 @@ info() {
 d=$1
 shift
 for p in "$@"; do info source "$p"; done
-info destination "$d"
-a=$d
-while [ ! -d "$a" ]; do
-    n=$(dirname "$a")
-    if [ "$n" = "$a" ]; then break; fi
-    a=$n
-done
-w=no
-if [ -w "$a" ]; then w=yes; fi
-f=$(df -Pk "$a" 2>/dev/null | awk 'NR==2 {print $4}')
-r=$(realpath "$a" 2>/dev/null || readlink -f "$a" 2>/dev/null)
-printf 'parent\0%s\0%s\0%s\0%s\0' "$a" "$w" "$f" "$r"
+if [ -n "$d" ]; then
+    info destination "$d"
+    a=$d
+    while [ ! -d "$a" ]; do
+        n=$(dirname "$a")
+        if [ "$n" = "$a" ]; then break; fi
+        a=$n
+    done
+    w=no
+    if [ -w "$a" ]; then w=yes; fi
+    f=$(df -Pk "$a" 2>/dev/null | awk 'NR==2 {print $4}')
+    r=$(realpath "$a" 2>/dev/null || readlink -f "$a" 2>/dev/null)
+    printf 'parent\0%s\0%s\0%s\0%s\0' "$a" "$w" "$f" "$r"
+fi
 printf 'end\0'
 )SH";
 
@@ -66,7 +68,8 @@ QString RemoteProbe::Result::error() const
         if (exitCode == 255)
             return tr("ssh could not connect to the server.") + details;
         return tr("The server did not run the check - rsync cannot run there. The ssh account may allow sftp "
-                  "only, or its login shell is not a POSIX shell (sh, bash).")
+                  "only, or its login shell is not a POSIX shell (sh, bash). rsync cannot copy to or from such an "
+                  "account; mount it with sshfs (or copy it in Dolphin) and copy through the mount instead.")
             + details;
     }
     if (!rsyncFound)
@@ -106,7 +109,8 @@ QString RemoteProbe::Result::destinationInsideSource() const
 QString RemoteProbe::remoteCommand(const QStringList &sources, const QString &destination)
 {
     QStringList words{QStringLiteral("sh"), QStringLiteral("-c"), remoteShellQuote(QString::fromUtf8(kScript)),
-                      QStringLiteral("rsync-gui-probe"), remoteScriptPath(destination)};
+                      QStringLiteral("rsync-gui-probe"),
+                      destination.isEmpty() ? QStringLiteral("''") : remoteScriptPath(destination)};
     for (const QString &source : sources)
         words << remoteScriptPath(source);
     return words.join(QLatin1Char(' '));
@@ -141,6 +145,7 @@ RemoteProbe::Result RemoteProbe::parse(const QByteArray &output, const QStringLi
             if (tag == "destination") {
                 info.path = destination;
                 result.destination = info;
+                result.destinationChecked = true;
             } else {
                 info.path = sourceIndex < sources.size() ? sources.at(sourceIndex) : QString();
                 ++sourceIndex;
@@ -182,6 +187,40 @@ qint64 RemoteProbe::parseSize(const QByteArray &output)
         }
     }
     return any ? total : -1;
+}
+
+std::optional<RemoteProbe::Target> RemoteProbe::targetFor(const RsyncJob::Transfer &transfer)
+{
+    Target target;
+    target.port = transfer.port;
+    if (transfer.runsOnServer()) {
+        target.kind = Target::Kind::OnServer;
+        target.host = transfer.host;
+        target.sources = transfer.sources;
+        target.sourceSpecs = transfer.sources;
+        target.destination = transfer.destination;
+        return target;
+    }
+    const auto hostOf = [](const Location &loc) { return loc.user.isEmpty() ? loc.host : loc.user + QLatin1Char('@') + loc.host; };
+    // rsync copies from one remote host, or to one: all sources of a transfer have the same origin.
+    const Location first = transfer.sources.isEmpty() ? Location() : Location::parse(transfer.sources.first());
+    if (first.isRemote()) {
+        target.kind = Target::Kind::From;
+        target.host = hostOf(first);
+        for (const QString &spec : transfer.sources) {
+            target.sources << Location::parse(spec).path;
+            target.sourceSpecs << spec;
+        }
+        return target;
+    }
+    const Location dest = Location::parse(transfer.destination);
+    if (dest.isRemote()) {
+        target.kind = Target::Kind::To;
+        target.host = hostOf(dest);
+        target.destination = dest.path;
+        return target;
+    }
+    return std::nullopt;
 }
 
 RemoteProbe::RemoteProbe(const RsyncOptions &options, const QString &host, int port, const QStringList &sources,

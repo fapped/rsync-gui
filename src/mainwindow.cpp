@@ -1364,12 +1364,16 @@ void MainWindow::showNetworkShares()
 bool MainWindow::checkServers(const RsyncOptions &options, const Location &dest, RsyncJob::Plan plan,
                               const QStringList &infos)
 {
-    PendingCopy pending{options, dest, std::move(plan), infos, {}, {}};
+    PendingCopy pending{options, dest, std::move(plan), infos, {}, {}, {}};
+    // Every transfer that involves a server: rsync on it, from it or to it. Besides the checks this finds accounts
+    // that cannot run rsync (sftp only) before rsync fails with "protocol version mismatch", and it opens the shared
+    // ssh connection that the runs of the job then use.
     for (int i = 0; i < pending.plan.transfers.size(); ++i) {
-        const RsyncJob::Transfer &transfer = pending.plan.transfers.at(i);
-        if (!transfer.runsOnServer())
+        const std::optional<RemoteProbe::Target> target = RemoteProbe::targetFor(pending.plan.transfers.at(i));
+        if (!target)
             continue;
-        auto *probe = new RemoteProbe(options, transfer.host, transfer.port, transfer.sources, transfer.destination, this);
+        pending.targets.insert(i, *target);
+        auto *probe = new RemoteProbe(options, target->host, target->port, target->sources, target->destination, this);
         connect(probe, &RemoteProbe::finished, this, [this, i, probe](const RemoteProbe::Result &result) {
             probe->deleteLater();
             if (!m_pending)
@@ -1407,14 +1411,15 @@ void MainWindow::onServersChecked()
     bool createMissing = false;
     for (auto it = pending.results.cbegin(); it != pending.results.cend(); ++it) {
         const RsyncJob::Transfer &transfer = plan.transfers.at(it.key());
+        const RemoteProbe::Target &target = pending.targets.value(it.key());
         const RemoteProbe::Result &result = it.value();
-        const QString where = transfer.port > 0 ? tr("%1 (port %2)").arg(transfer.host).arg(transfer.port) : transfer.host;
+        const QString where = target.port > 0 ? tr("%1 (port %2)").arg(target.host).arg(target.port) : target.host;
         if (result.cancelled) {
             m_resultLabel->setText(tr("Cancelled."));
             return;
         }
         if (const QString error = result.error(); !error.isEmpty()) {
-            QMessageBox::warning(this, tr("Cannot copy on the server"), tr("%1:\n%2").arg(where, error));
+            QMessageBox::warning(this, tr("Cannot use the server"), tr("%1:\n%2").arg(where, error));
             return;
         }
         if (const QString source = result.destinationInsideSource(); !source.isEmpty()) {
@@ -1430,9 +1435,11 @@ void MainWindow::onServersChecked()
         }
         for (const QString &path : result.missingSources())
             missing << tr("%1 (on %2)").arg(LocalPath::display(path), where);
-        if (result.destination.type == RemoteProbe::Type::Missing)
+        // Created on the server before rsync runs there; a copy to the server creates the last directory itself.
+        if (result.destinationChecked && result.destination.type == RemoteProbe::Type::Missing
+            && target.kind == RemoteProbe::Target::Kind::OnServer)
             createMissing = true;
-        if (!result.parentWritable)
+        if (result.destinationChecked && !result.parentWritable)
             notWritable << tr("%1 on %2").arg(LocalPath::display(result.existingParent), where);
         QString info = tr("Server %1: %2").arg(where, result.rsyncVersion);
         if (result.freeBytes >= 0)
@@ -1447,9 +1454,13 @@ void MainWindow::onServersChecked()
         if (answer != QMessageBox::Yes)
             return;
         for (auto it = pending.results.cbegin(); it != pending.results.cend(); ++it) {
-            for (const QString &path : it.value().missingSources()) {
-                plan.transfers[it.key()].sources.removeAll(path);
-                plan.missing << tr("%1 (on %2)").arg(path, plan.transfers.at(it.key()).host);
+            const RemoteProbe::Target &target = pending.targets.value(it.key());
+            const QList<RemoteProbe::PathInfo> &checked = it.value().sources;
+            for (qsizetype i = 0; i < checked.size() && i < target.sourceSpecs.size(); ++i) {
+                if (checked.at(i).type != RemoteProbe::Type::Missing)
+                    continue;
+                plan.transfers[it.key()].sources.removeAll(target.sourceSpecs.at(i));
+                plan.missing << tr("%1 (on %2)").arg(checked.at(i).path, target.host);
             }
         }
         plan.transfers.removeIf([](const RsyncJob::Transfer &transfer) { return transfer.sources.isEmpty(); });

@@ -247,6 +247,7 @@ private:
     bool m_awaitingPid = false; // a transfer on the server: the first line is the PID of the remote rsync
     qint64 m_remotePid = 0;
     QByteArray m_cleanUpOutput; // the records of the CleanUp pass
+    bool m_shellNotClean = false; // rsync reported "protocol version mismatch -- is your shell clean?"
     std::shared_ptr<std::atomic<bool>> m_dropCancel; // set while the page cache is being dropped
     QPointer<QThread> m_dropThread;
 };

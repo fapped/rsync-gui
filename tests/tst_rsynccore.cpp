@@ -272,6 +272,7 @@ private slots:
     void probeParse();
     void probeScriptLocally();
     void cleanUpScriptLocally();
+    void probeTargets();
     void mountInfo();
     void networkShares();
     void shareSettings();
@@ -349,6 +350,7 @@ private slots:
     void remoteSharedConnection();
     void remoteSshfsShare();
     void remoteSambaDetect();
+    void remoteFromSftpOnly();
     void remoteAskpassHostKeyAndPassword();
 };
 
@@ -946,6 +948,49 @@ void TestRsyncCore::probeScriptLocally()
         {"src dir"}, home + "/dest");
     QCOMPARE(fine.destination.type, RemoteProbe::Type::Directory);
     QCOMPARE(fine.destinationInsideSource(), QString());
+}
+
+void TestRsyncCore::probeTargets()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    writeFile(tmp.filePath("f"), "f");
+    RsyncOptions o;
+    // On the server, from it, to it, local.
+    auto plan = localPlan({"u@h:/a", "u@h:/b c"}, "u@h:/d", o);
+    auto target = RemoteProbe::targetFor(plan.transfers.first());
+    QCOMPARE(target->kind, RemoteProbe::Target::Kind::OnServer);
+    QCOMPARE(target->host, QStringLiteral("u@h"));
+    QCOMPARE(target->destination, QStringLiteral("/d/"));
+    plan = RsyncJob::plan({Location::parse("sftp://u@h:2222/x y"), Location::parse("sftp://u@h:2222/z")},
+                          Location::parse(tmp.filePath("dest")), o);
+    target = RemoteProbe::targetFor(plan.transfers.first());
+    QCOMPARE(target->kind, RemoteProbe::Target::Kind::From);
+    QCOMPARE(target->host, QStringLiteral("u@h"));
+    QCOMPARE(target->port, 2222);
+    QCOMPARE(target->sources, (QStringList{"/x y", "/z"}));
+    QCOMPARE(target->sourceSpecs, plan.transfers.first().sources);
+    QCOMPARE(target->destination, QString());
+    plan = localPlan({tmp.filePath("f")}, "h:backup", o);
+    target = RemoteProbe::targetFor(plan.transfers.first());
+    QCOMPARE(target->kind, RemoteProbe::Target::Kind::To);
+    QCOMPARE(target->host, QStringLiteral("h"));
+    QCOMPARE(target->sources, QStringList());
+    QCOMPARE(target->destination, QStringLiteral("backup/"));
+    plan = localPlan({tmp.filePath("f")}, tmp.filePath("dest"), o);
+    QVERIFY(!RemoteProbe::targetFor(plan.transfers.first()));
+
+    // Without a destination only the sources are checked.
+    for (const QStringList &shell : availableShells()) {
+        const RemoteProbe::Result r = RemoteProbe::parse(
+            runRemoteCommandLocally(shell, RemoteProbe::remoteCommand({"f", "missing"}, QString()), tmp.path()),
+            {"f", "missing"}, QString());
+        QVERIFY(r.ran);
+        QVERIFY(!r.destinationChecked);
+        QCOMPARE(r.missingSources(), QStringList{"missing"});
+        QCOMPARE(r.existingParent, QString());
+        QCOMPARE(r.error(), haveRsync() ? QString() : r.error());
+    }
 }
 
 void TestRsyncCore::cleanUpScriptLocally()
@@ -2323,7 +2368,10 @@ void TestRsyncCore::deleteJobDuringCacheDrop()
     QTest::qWait(200); // a queued call from the thread would arrive now
     QVERIFY(!finished);
     QVERIFY2(threadsDuring > threadsBefore, "the cache was not being dropped in a thread when the job was deleted");
-    QCOMPARE(threadsAfter, threadsBefore);
+    // The thread has ended by the time delete returns. Compared with the count right before the delete, not with
+    // the one at the start: other threads (Qt's thread pool) may start or end in the meantime.
+    QVERIFY2(threadsAfter < threadsDuring, qPrintable(QStringLiteral("%1 threads before the delete, %2 after")
+                                                          .arg(threadsDuring).arg(threadsAfter)));
 }
 
 void TestRsyncCore::speedHistoryAverages()
@@ -3001,6 +3049,39 @@ void TestRsyncCore::remoteSambaDetect()
     QVERIFY(runJob(job));
     QVERIFY(job.summary().ok());
     QCOMPARE(server.run(QStringLiteral("stat -c %a '%1/dest/d' '%1/dest/d/f'").arg(server.dir)), QByteArray("750\n644\n"));
+}
+
+void TestRsyncCore::remoteFromSftpOnly()
+{
+    // A copy from an account for sftp only: the probe finds it before the start, and if rsync runs anyway, its
+    // "protocol version mismatch -- is your shell clean?" is explained.
+    const Location home = Location::parse(qEnvironmentVariable("RSYNC_GUI_TEST_SSH_SFTP_ONLY"));
+    const QString shell = qEnvironmentVariable("RSYNC_GUI_TEST_SSH_SHELL");
+    if (!home.isRemote() || shell.isEmpty())
+        QSKIP("No test ssh server - run tools/ssh-test/run.sh");
+    RsyncOptions options = testOptions();
+    options.useRemoteShell = true;
+    options.remoteShell = shell;
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    Location source = home;
+    source.path += QStringLiteral("/x");
+    const RsyncJob::Plan plan = RsyncJob::plan({source}, Location::parse(tmp.path()), options);
+    QVERIFY2(plan.ok(), qPrintable(plan.error));
+    const std::optional<RemoteProbe::Target> target = RemoteProbe::targetFor(plan.transfers.first());
+    QVERIFY(target);
+    const RemoteProbe::Result r = runProbe(options, home, target->sources, target->destination);
+    QVERIFY(!r.ran);
+    QVERIFY2(r.error().contains("sftp only"), qPrintable(r.error()));
+
+    RsyncJob job(plan.transfers, options);
+    QStringList log;
+    connect(&job, &RsyncJob::log, this, [&log](RsyncJob::LogLevel, const QString &text) { log << text; });
+    QVERIFY(runJob(job));
+    QCOMPARE(job.summary().transfersFailed, 1);
+    const QString text = log.join('\n');
+    QVERIFY2(text.contains("is your shell clean?"), qPrintable(text));
+    QVERIFY2(text.contains("rsync could not be started on the server"), qPrintable(text));
 }
 
 void TestRsyncCore::remoteAskpassHostKeyAndPassword()

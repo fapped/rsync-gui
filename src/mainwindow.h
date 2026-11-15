@@ -197,6 +197,7 @@ private:
         RsyncJob::Plan plan;
         QStringList infos;
         QHash<int, RemoteProbe::Result> results; // by the index of the transfer
+        QHash<int, RemoteProbe::Target> targets;
         QList<QPointer<RemoteProbe>> probes;
     };
     std::optional<PendingCopy> m_pending;
